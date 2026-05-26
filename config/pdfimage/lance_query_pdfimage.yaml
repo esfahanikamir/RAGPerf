@@ -12,7 +12,7 @@ rag:
     embedding: false
     insert: false
     build_index: false
-    reranking: false
+    reranking: true
     retrieval: true
     generation: true
     evaluate: false
@@ -37,23 +37,26 @@ rag:
   retrieval:
     question_num: 4
     retrieval_batch_size: 1
-    top_k: 2
+    top_k: 10
+  reranking:
+    rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2 
+    top_n: 2
+    device: cuda:0
   pipeline:
     batch_size: 1
 run_name: default_run
 sys:
   devices:
     cpu: cpu
-    gpu_count: 2
+    gpu_count: 1
     gpus:
     - cuda:0
-    - cuda:1
   log:
     metrics_log: ./log/default_run.log
   vector_db:
     collection_name: 'lance_image_test' 
     # db_path: /mnt/data1/yuanxu4/lancedb # local path for lance db
-    db_path: /local/amirk/RAGPerf_dbs/lance_pdf # local path for lance db
+    db_path: /local/amirk/RAGPerf/RAGPerf_dbs/lance_pdf # local path for lance db
     db_token: 
     drop_previous_collection: false
     type: lancedb
