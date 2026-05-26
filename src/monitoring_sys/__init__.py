@@ -54,7 +54,11 @@ class MSys:
 
     def __init__(self, msys_config: MSysConfig):
         self.__msys_config = msys_config
-        self.__msys_id = lms.getMonitoringSystem(**msys_config.init_config)
+        # self.__msys_id = lms.getMonitoringSystem(**msys_config.init_config)
+        self.__msys_id = lms.getMonitoringSystem(
+            msys_config.init_config["output_dir"],
+            msys_config.init_config["default_sample_period_ms"]
+        )
         self.__msys_add_meter_functions = self.msys_add_monitor_functions
 
         for meter_property in msys_config.meter_configs:
@@ -67,13 +71,39 @@ class MSys:
                 f"Unknown meter type: {meter_type}, "
                 f"available meters: {list(self.__msys_add_meter_functions.keys())}"
             )
-            ret = add_meter_func(self.__msys_id, **meter_property)
+            # ret = add_meter_func(self.__msys_id, **meter_property)
+            # changed by amir - pybind11 doesn't handle optional kwargs properly
+            if meter_type == "CPUMeter":
+                sample_period = meter_property.pop("sample_period_ms", 0)
+                ret = add_meter_func(self.__msys_id, sample_period)
+            elif meter_type == "DiskMeter":
+                devices = meter_property.pop("devices", [])
+                sample_period = meter_property.pop("sample_period_ms", 0)
+                ret = add_meter_func(self.__msys_id, devices, sample_period)
+            elif meter_type == "MemMeter":
+                probes = meter_property.pop("probes", [])
+                sample_period = meter_property.pop("sample_period_ms", 0)
+                ret = add_meter_func(self.__msys_id, probes, sample_period)
+            elif meter_type == "GPUMeter":
+                gpu_ids = meter_property.pop("gpu_ids", [])
+                nvml_metrics = meter_property.pop("nvml_metrics", [])
+                gpm_metrics = meter_property.pop("gpm_metrics", [])
+                sample_period = meter_property.pop("sample_period_ms", 0)
+                ret = add_meter_func(self.__msys_id, gpu_ids, nvml_metrics, gpm_metrics, sample_period)
+            elif meter_type == "ProcMeter":
+                pids = meter_property.pop("pids", [])
+                probes = meter_property.pop("probes", [])
+                sample_period = meter_property.pop("sample_period_ms", 0)
+                ret = add_meter_func(self.__msys_id, pids, probes, sample_period)
+            else:
+                ret = add_meter_func(self.__msys_id, **meter_property)
             assert (
                 ret
             ), f"Failed to add meter: {meter_type} with properties: {json.dumps(meter_property)}"
 
     def test_run(self) -> bool:
-        return lms.testRun(self.__msys_id)
+        # return lms.testRun(self.__msys_id)
+        return lms.testRun(self.__msys_id, True)
 
     def report_status(self, verbose: bool = False, detail: bool = False) -> None:
         lms.reportStatus(self.__msys_id, verbose, detail)

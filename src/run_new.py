@@ -33,7 +33,7 @@ def main():
     from datasetPreprocess.TextDatasetPreprocess import TextDatasetPreprocess
     from datasetLoader.PDFDatasetLoader import PDFDatasetLoader
 
-    # from datasetPreprocess.PDFDatasetPreprocess import PDFDatasetPreprocess
+    from datasetPreprocess.PDFDatasetPreprocess import PDFDatasetPreprocess
 
     from RAGRequest.TextsRAGRequest import WikipediaRequests
     from RAGPipeline.TextsRAGPipline import TextsRAGPipeline

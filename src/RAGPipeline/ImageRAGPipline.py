@@ -106,7 +106,8 @@ class ImagesRAGPipeline(BaseRAGPipeline):
                     # self.responser.free_llm()
                     cprint.iprintf(f"*** Generation done")
 
-                    with open("response.out", "w") as fout:
+                    # with open("response.out", "w") as fout:
+                    with open("response.out", "w", encoding='utf-8') as fout:
                         for idx, response in enumerate(responses):
                             fout.write(f"=== response {idx + 1} ===\n")
                             fout.write(response.strip() + "\n\n")

@@ -1,6 +1,6 @@
 from datasetPreprocess.BaseDatasetPreprocess import BaseDatasetPreprocess
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-
+# from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 class TextDatasetPreprocess(BaseDatasetPreprocess):
     def __init__(self, chunk_size=512, chunk_overlap=0.1):

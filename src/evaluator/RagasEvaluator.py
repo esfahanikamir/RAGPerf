@@ -7,8 +7,10 @@ from ragas.embeddings import BaseRagasEmbeddings
 from ragas.run_config import RunConfig
 from FlagEmbedding import FlagModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
-from langchain.llms.base import LLM
-from langchain.callbacks.manager import CallbackManagerForLLMRun
+# from langchain.llms.base import LLM
+from langchain_core.language_models.llms import LLM
+# from langchain.callbacks.manager import CallbackManagerForLLMRun
+from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 import asyncio
 from evaluator.BaseEvaluator import BaseEvaluator
 

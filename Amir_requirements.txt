@@ -1,0 +1,4 @@
+arxiv
+langchain-text-splitters
+setuptools==80.9.0
+protobuf==6.30.2

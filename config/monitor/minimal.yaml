@@ -1,0 +1,5 @@
+MSys:
+  system:
+    output_dir: "./monitor_out"
+    default_sample_period_ms: 100
+  meter: []

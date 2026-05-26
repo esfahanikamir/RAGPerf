@@ -4,8 +4,8 @@ MSys:
     default_sample_period_ms: 100
   meter:
     - type: CPUMeter
-      # name: CPU Monitoring
-    - type: DiskMeter
+      name: CPU_Monitoring
+    # - type: DiskMeter
       # name: Disk Monitoring
       devices:
         ${{ - this_process.used_disks }}

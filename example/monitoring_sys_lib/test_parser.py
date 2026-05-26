@@ -22,21 +22,27 @@ search_dir = os.path.abspath(args.target_folder)
 cprint.iprintf(f"Analyze on folder {search_dir}")
 
 # differentiate the exact output folder with output folders with several outputs signified by timestamp
-outputs = {
-    dir_name: epoch
-    for dir_name, epoch in (
-        (d, datetime.strptime(d, Logger().dir_time_format).replace(tzinfo=timezone.utc).timestamp())
-        for d in os.listdir(search_dir)
-        if os.path.isdir(os.path.join(search_dir, d))
-    )
-}
-sorted_outputs = sorted(outputs.items(), key=lambda x: x[1], reverse=True)
+# outputs = {
+#     dir_name: epoch
+#     for dir_name, epoch in (
+#         (d, datetime.strptime(d, Logger().dir_time_format).replace(tzinfo=timezone.utc).timestamp())
+#         for d in os.listdir(search_dir)
+#         if os.path.isdir(os.path.join(search_dir, d))
+#     )
+# }
+outputs = os.listdir(search_dir)
+print(f"outputs = {outputs}")
+# sorted_outputs = sorted(outputs.items(), key=lambda x: x[1], reverse=True)
+sorted_outputs = outputs
 assert len(sorted_outputs) > 0, "No output directories found in the specified path."
+print(f"sorted outputs = {sorted_outputs}")
 
-output_folder_name, time_since_epoch = sorted_outputs[0]
+
+# output_folder_name, time_since_epoch = sorted_outputs[0]
+output_folder_name= sorted_outputs[0]
+
 output_folder = os.path.join(search_dir, output_folder_name)
 cprint.iprintf(f"Preprocessing output folder: {output_folder}")
-
 data_filenames = [
     filename for filename in os.listdir(output_folder) if filename.endswith(".pb.bin")
 ]

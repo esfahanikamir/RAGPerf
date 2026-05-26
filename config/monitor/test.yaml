@@ -1,0 +1,6 @@
+MSys:
+  system:
+    output_dir: ./output
+    default_sample_period_ms: 100
+  meter:
+    - type: CPUMeter

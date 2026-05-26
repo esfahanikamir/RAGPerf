@@ -11,7 +11,8 @@ class PDFDatasetLoader(BaseDatasetLoader):
     def __init__(
         self,
         dataset_name="common-pile/arxiv_papers",
-        output_dir="/mnt/data1/yuanxu4/local_dataset/arxiv",
+        # output_dir="/mnt/data1/yuanxu4/local_dataset/arxiv",
+        output_dir="/local/amirk/RAGPerf_data/arxiv",
     ):
         super().__init__(dataset_name=dataset_name)
         if self.dataset_name == "common-pile/arxiv_papers":
