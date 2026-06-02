@@ -168,7 +168,7 @@ class Ragasvllm(BaseEvaluator):
         self.llm: AsyncLLMEngine = AsyncLLMEngine.from_engine_args(
             AsyncEngineArgs(
                 model=self.llm_name,
-                task='generate',  # generation task
+                # task='generate',  # generation task
                 enforce_eager=True,
                 # device=self.device,
                 dtype=torch.bfloat16,

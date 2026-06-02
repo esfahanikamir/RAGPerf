@@ -22,10 +22,16 @@ class SentenceTransformerEncoder(BaseEncoder):
     def __del__(self):
         self.free_encoder()
 
+    # def load_encoder(self) -> None:
+    #     self.encoder = SentenceTransformer(
+    #         self.sentence_transformers_name,
+    #         self.device,
+    #         model_kwargs={"torch_dtype": "float16"},
+    #     )
     def load_encoder(self) -> None:
         self.encoder = SentenceTransformer(
             self.sentence_transformers_name,
-            self.device,
+            device=self.device,  # ← CORRECT: keyword argument
             model_kwargs={"torch_dtype": "float16"},
         )
         self.dim = self.encoder.get_sentence_embedding_dimension()

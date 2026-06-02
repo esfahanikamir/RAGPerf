@@ -145,7 +145,7 @@ for data_filename in data_filenames:
         ax.set_xlim(0, timestamps[-1])
         ax.set_ylim(0, 15)
         ax.yaxis.set_major_formatter(mtick.PercentFormatter())
-        fig.savefig(f"{data_filename}.png", dpi=300, bbox_inches='tight')
+        fig.savefig(f"{output_folder}/{data_filename}.png", dpi=300, bbox_inches='tight')
         cprint.iprintf(f"CPU metrics figure saved to {data_filename}.png")
 
     if data_filename.startswith("GPUMeter"):
@@ -244,5 +244,5 @@ for data_filename in data_filenames:
             ax.axvline(x=t, color='black', linestyle='--', linewidth=1)
         ax.set_xticks(range(0, int(timestamps[-1]) + 1, 5))
 
-        fig.savefig(f"{data_filename}.png", dpi=300, bbox_inches='tight')
+        fig.savefig(f"{output_folder}/{data_filename}.png", dpi=300, bbox_inches='tight')
         cprint.iprintf(f"GPU metrics figure saved to {data_filename}.png")

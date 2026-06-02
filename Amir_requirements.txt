@@ -2,3 +2,9 @@ arxiv
 langchain-text-splitters
 setuptools==80.9.0
 protobuf==6.30.2
+torch==2.11.0
+torchaudio==2.11.0
+torchvision==0.26.0
+transformers==5.9.0
+vllm==0.21.0
+sentence-transformers==5.5.0

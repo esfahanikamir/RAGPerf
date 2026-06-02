@@ -294,10 +294,10 @@ for output_run in sorted_outputs:
                             mem[0, id, metric_idx] = proc.used_gpu_memory
                 # else:
                 #     mem[0, 0, metric_idx] = 0
-                if metric.per_gpu_metrics[1].per_process_gpu_metrics:
-                    for id, proc in enumerate(metric.per_gpu_metrics[1].per_process_gpu_metrics):
-                        if id < mem.shape[1]:
-                            mem[1, id + 2, metric_idx] = proc.used_gpu_memory
+                # if metric.per_gpu_metrics[1].per_process_gpu_metrics:
+                #     for id, proc in enumerate(metric.per_gpu_metrics[1].per_process_gpu_metrics):
+                #         if id < mem.shape[1]:
+                #             mem[1, id + 2, metric_idx] = proc.used_gpu_memory
             # normalize ntslices
             # result = result / np.sum(result, axis=0) * 100
             # if smoothing:

@@ -38,12 +38,13 @@ sys:
     gpu_count: 2
     gpus:
     - cuda:0
-    - cuda:1
+    # - cuda:1
   log:
     metrics_log: ./log/default_run.log
   vector_db:
     collection_name: 'lance_insert_pdftext_test' 
-    db_path: /mnt/data1/yuanxu4/lancedb # local path for lance db
+    # db_path: /mnt/data1/yuanxu4/lancedb # local path for lance db
+    db_path: /local/amirk/RAGPerf/RAGPerf_dbs/lance_pdftxt
     db_token: 
     drop_previous_collection: false
     type: lancedb

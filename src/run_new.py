@@ -38,6 +38,9 @@ def main():
     from RAGRequest.TextsRAGRequest import WikipediaRequests
     from RAGPipeline.TextsRAGPipline import TextsRAGPipeline
     from RAGPipeline.ImageRAGPipline import ImagesRAGPipeline
+
+    from RAGPipeline.ImageRAGPipline_rerank import ImagesRAGPipeline_rerank
+
     from RAGPipeline.retriever.BaseRetriever import BaseRetriever
     from RAGPipeline.reranker.CrossEncoderReranker import CrossEncoderReranker
     from RAGPipeline.responser.TextsResponser import VLLMResponser
@@ -144,7 +147,8 @@ def main():
     dataset_name = config["bench"]["dataset"]
     save_config_to_log_dir(args.config)
     # for image RAG
-    if config["bench"]["type"] == "image":
+    type = config["bench"]["type"]
+    if type == "image" or type == "image_rerank":
         pass
         # preprocess dataset
         with monitor:
@@ -229,11 +233,31 @@ def main():
                 model_name=config["rag"]["embedding"]["sentence_transformers_name"],
                 embedding_batch_size=config["rag"]["embedding"]["batch_size"],
             )
-            RAGPipline = ImagesRAGPipeline(
-                retriever=retriever,
-                responser=responser,
-                embedder=embedder,
-            )
+
+            # added by Amir for image_rerank
+            if config["bench"]["type"] == "image_rerank":
+                if config['rag']['action']['reranking']:
+                    reranker = CrossEncoderReranker(
+                        model_name=config["rag"]["reranking"]["rerank_model"],
+                        top_n=config["rag"]["reranking"]["top_n"],
+                        device=config["rag"]["reranking"]["device"],
+                    )
+                else:
+                    reranker = None
+                RAGPipline = ImagesRAGPipeline_rerank(
+                    retriever=retriever,
+                    responser=responser,
+                    embedder=embedder,
+                    reranker= reranker
+                )
+            elif config["bench"]["type"] == "image":
+                RAGPipline = ImagesRAGPipeline(
+                    retriever=retriever,
+                    responser=responser,
+                    embedder=embedder,
+                )
+            else:
+                raise Exception("type is neither image nor image_rerank")
 
             # pipeline.check()
             import utils.colored_print as cprint

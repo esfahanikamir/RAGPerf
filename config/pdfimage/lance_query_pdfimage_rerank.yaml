@@ -1,6 +1,6 @@
 bench:
   dataset: common-pile/arxiv_papers
-  type: text
+  type: image_rerank
   preprocessing:
     chunk_overlap: 0
     chunk_size: 512
@@ -19,29 +19,30 @@ rag:
   build_index:
     index_type: IVF_HNSW_SQ
     metric_type: L2
-  evaluate:
-    evaluator_model: Qwen/Qwen2-7B-Instruct-GPTQ-Int8
   embedding:
     device: cuda:0  
-    sentence_transformers_name: all-MiniLM-L6-v2
+    sentence_transformers_name: vidore/colpali-v1.2
     batch_size: 1024
     embedding_framework: sentence_transformers
     model: nomic-ai/nomic-embed-text-v2-moe
     store: false
     load: false
+  insert:
+    batch_size: 512
+    collection_name: ''
+    drop_previous_collection: false
   generation:
     device: cuda:0
-    model: Qwen/Qwen2.5-7B-Instruct
-    # gpu_memory_utilization: 0.75  # ← Change from 0.85 to 0.75 -> was hardcoded
-    parallelism: 1
-  reranking:
-    device: cuda:0
-    rerank_model: Qwen/Qwen2.5-7B-Instruct
-    top_n: 5
+    model: Qwen/Qwen2-VL-7B-Instruct
   retrieval:
     question_num: 8
     retrieval_batch_size: 4
     top_k: 10
+  reranking:
+    # rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2 
+    rerank_model: Qwen/Qwen2.5-7B-Instruct
+    top_n: 4
+    device: cuda:0
   pipeline:
     batch_size: 4
 run_name: default_run
@@ -51,13 +52,12 @@ sys:
     gpu_count: 1
     gpus:
     - cuda:0
-    # - cuda:1
   log:
     metrics_log: ./log/default_run.log
   vector_db:
-    collection_name: 'lance_insert_pdftext_test' 
+    collection_name: 'lance_image_test' 
     # db_path: /mnt/data1/yuanxu4/lancedb # local path for lance db
-    db_path: /local/amirk/RAGPerf/RAGPerf_dbs/lance_pdftxt
+    db_path: /local/amirk/RAGPerf/RAGPerf_dbs/lance_pdfimage # local path for lance db
     db_token: 
     drop_previous_collection: false
     type: lancedb

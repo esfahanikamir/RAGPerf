@@ -13,6 +13,7 @@ class CrossEncoderReranker(BaseReranker):
 
     def load_reranker(self):
         self.model = CrossEncoder(self.model_name, device=self.device)
+        print("Amir-log: re-ranker loaded")
 
     def rerank(self, query, candidate_docs):
         pairs = [(query, doc) for doc in candidate_docs]
@@ -25,7 +26,8 @@ class CrossEncoderReranker(BaseReranker):
         queries: List[str], candidate_docs_list: List[List[str]]
         returns: List[List[str]] - top-k reranked document texts per query
         """
-        assert len(queries) == len(candidate_docs_list), "Length mismatch"
+        
+        assert len(queries) == len(candidate_docs_list), f"Length mismatch\n len(queries) = {len(queries)} while len(candidate_docs_list) = {len(candidate_docs_list)}))"
 
         all_pairs = []
         index_ranges = []
