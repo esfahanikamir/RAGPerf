@@ -12,7 +12,7 @@ rag:
     embedding: false
     insert: false
     build_index: false
-    reranking: true
+    reranking: false
     retrieval: true
     generation: true
     evaluate: false
@@ -38,10 +38,6 @@ rag:
     question_num: 4
     retrieval_batch_size: 1
     top_k: 10
-  reranking:
-    rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2 
-    top_n: 4
-    device: cuda:0
   pipeline:
     batch_size: 1
 run_name: default_run

@@ -7,6 +7,9 @@ from RAGPipeline.BaseRAGPipline import BaseRAGPipeline
 from RAGPipeline.ImageRAGPipline import ImagesRAGPipeline
 from encoder.sentenceTransformerEncoder import SentenceTransformerEncoder
 from RAGPipeline.retriever.BaseRetriever import BaseRetriever
+
+from RAGPipeline.retriever.Amirs_Retriever import AmirsRetriever  
+
 from RAGPipeline.reranker.CrossEncoderReranker import CrossEncoderReranker
 from evaluator.RagasEvaluator import RagasEvaluator
 from datasets import Dataset
@@ -72,7 +75,9 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
             self.embedder.load_encoder()
             self.responser.load_llm()
             if self.reranker is not None:
-                self.reranker.load_reranker()
+                # self.reranker.load_reranker()
+                # imagepdf is not using reranker model -> only dot-product
+                pass
             cprint.iprintf(f"*** Loading models done")
 
             # for now let us assume that the number of questions is devisible by the batch size
@@ -135,18 +140,22 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     cprint.iprintf(f"*** Retrieval done")
 
                     # Rerank Added by Amir
-                    # if self.reranker is not None:
-                    #     cprint.iprintf(
-                    #         f"*** Reranking top-{self.reranker.top_n} from {self.retriever.top_k} candidates"
-                    #     )
-                    #     log_time_breakdown("rerank")
-                    #     rerank_start_time = time.monotonic_ns()
-                    #     # print(f"results:\n {results}")
-                    #     results = self.reranker.batch_rerank(questions, results)
-                    #     # results = self.reranker.rerank(questions[j], results)
-                    #     rerank_end_time = time.monotonic_ns()
-                    #     # self.reranker.free_reranker()
-                    #     cprint.iprintf(f"*** Reranking done")
+                    if self.reranker is not None:
+                        cprint.iprintf(
+                            f"*** Reranking top-{self.reranker.top_n} from {self.retriever.top_k} candidates"
+                        )
+                        log_time_breakdown("rerank")
+                        rerank_start_time = time.monotonic_ns()
+                        # print(f"results:\n {results}")
+                        results = self.retriever.pdfimage_rerank(
+                            query_embeddings = query,
+                            top_k_results = results,
+                            top_n = self.reranker.top_n
+                        )
+                        # results = self.reranker.rerank(questions[j], results)
+                        rerank_end_time = time.monotonic_ns()
+                        # self.reranker.free_reranker()
+                        cprint.iprintf(f"*** Reranking done")
 
                     # augment
                     log_time_breakdown("prompt")
@@ -180,8 +189,11 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     retrieval_time[batch_num][j] = retrieval_end_time - retrieval_start_time
                     batch_retrieval_time[batch_num] += retrieval_time[batch_num][j]
 
-                    rerank_time[batch_num][j] = 0
-                    # rerank_time[batch_num][j] = rerank_end_time - rerank_start_time
+                    # rerank_time[batch_num][j] = 0
+                    if self.reranker is not None:
+                        rerank_time[batch_num][j] = rerank_end_time - rerank_start_time
+                    else:
+                        rerank_time[batch_num][j] = 0
                     batch_rerank_time[batch_num] += rerank_time[batch_num][j]
 
                     prompt_time[batch_num][j] = prompt_end_time - prompt_start_time
@@ -205,7 +217,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
                     f"\tSum of retrieval times: {batch_retrieval_time[batch_num]} ns ({batch_retrieval_time[batch_num] / 1e9} s, ({batch_retrieval_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
 
-                    # f"\t Sum of reranking time: {batch_rerank_time[batch_num]} ns ({batch_rerank_time[batch_num] / 1e9} s, ({batch_rerank_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
+                    f"\tSum of reranking time: {batch_rerank_time[batch_num]} ns ({batch_rerank_time[batch_num] / 1e9} s, ({batch_rerank_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
 
                     f"\tSum of prompt times: {batch_prompt_time[batch_num]} ns ({batch_prompt_time[batch_num] / 1e9} s, ({batch_prompt_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
 
@@ -227,12 +239,13 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
             txt_to_print = ("***Complete timing profile***\n" +
                     # f"{i}\t" +
-                    f"{t_embedding_time}\t" +
-                    f"{t_retrieval_time}\t" +
-                    f"{t_rerank_time}\t" +
-                    f"{t_prompt_time}\t" +
-                    f"{t_generation_time}\t" +
-                    f"{t_total_time}\n" 
+                    f"Embedding: {t_embedding_time} : {(100 * t_embedding_time / t_total_time):.2f}%\n" +
+                    f"Retrieval: {t_retrieval_time} : {(100 * t_retrieval_time / t_total_time):.2f}%\n" +
+                    f"Re-ranking: {t_rerank_time} : {(100 * t_rerank_time / t_total_time):.2f}%\n" +
+                    f"Prompt: {t_prompt_time} : {(100 * t_prompt_time / t_total_time):.2f}%\n" +
+                    f"Generation: {t_generation_time} : {(100 * t_generation_time / t_total_time):.2f}%\n" +
+                    f"Total: {t_total_time}\n" 
+                    f"{'*' * 50}\n"
             )
             
             with open(output_path, "a") as fout:
@@ -246,7 +259,8 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
             self.embedder.free_encoder()
             self.responser.free_llm()
             if self.reranker is not None:
-                self.reranker.free_reranker()
+                # self.reranker.free_reranker()
+                pass # no reranker model -> dot.product
             cprint.iprintf(f"*** Unloading models done")
             log_time_breakdown("done")
             

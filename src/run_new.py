@@ -42,6 +42,10 @@ def main():
     from RAGPipeline.ImageRAGPipline_rerank import ImagesRAGPipeline_rerank
 
     from RAGPipeline.retriever.BaseRetriever import BaseRetriever
+
+    from RAGPipeline.retriever.Amirs_Retriever import AmirsRetriever
+
+
     from RAGPipeline.reranker.CrossEncoderReranker import CrossEncoderReranker
     from RAGPipeline.responser.TextsResponser import VLLMResponser
     from RAGPipeline.responser.ImagesResponser import ImageResponser
@@ -218,12 +222,22 @@ def main():
             print(f"***End request preparation")
 
             # prepare pipeline
-            retriever = BaseRetriever(
-                collection_name=collection_name,
-                top_k=config["rag"]["retrieval"]["top_k"],
-                retrieval_batch_size=config["rag"]["retrieval"]["retrieval_batch_size"],
-                client=db_client,
-            )
+            if type == "image":
+                retriever = BaseRetriever(
+                    collection_name=collection_name,
+                    top_k=config["rag"]["retrieval"]["top_k"],
+                    retrieval_batch_size=config["rag"]["retrieval"]["retrieval_batch_size"],
+                    client=db_client,
+                    # hardcoded top_n sample to be constsnt with my imagerag version
+                    top_n=4
+                )
+            elif type == "image_rerank":
+                retriever = AmirsRetriever(
+                    collection_name=collection_name,
+                    top_k=config["rag"]["retrieval"]["top_k"],
+                    retrieval_batch_size=config["rag"]["retrieval"]["retrieval_batch_size"],
+                    client=db_client
+                )
             responser = ImageResponser(
                 model=config["rag"]["generation"]["model"],
                 device=config["rag"]["generation"]["device"],
