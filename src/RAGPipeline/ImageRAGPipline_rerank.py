@@ -218,14 +218,28 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         rerank_dotp_time[batch_num][j] = 0
 
                     batch_rerank_time[batch_num] += rerank_time[batch_num][j]
-                    batch_rerank_storage_time[batch_num] += rerank_storage_time[batch_num][j]
-                    batch_rerank_dotp_time[batch_num] += rerank_dotp_time[batch_num][j]
+                    # batch_rerank_storage_time[batch_num] += rerank_storage_time[batch_num][j]
+                    # batch_rerank_dotp_time[batch_num] += rerank_dotp_time[batch_num][j]
 
                     prompt_time[batch_num][j] = prompt_end_time - prompt_start_time
                     batch_prompt_time[batch_num] += prompt_time[batch_num][j]
 
                     generation_time[batch_num][j] = generation_end_time - generation_start_time
                     batch_generation_time[batch_num] += generation_time[batch_num][j]
+
+                    if self.reranker is not None:
+                        txt_to_print_q = (
+                            f"Batch {batch_num} query {j}/{batch_size - 1} queries \n"
+
+                            f"\t\tMax rerank_storage / rerank = {rerank_storage_time[batch_num][j] / rerank_time[batch_num][j] * 100:.2f}%\n"
+
+                            f"\t\tMaxr rerank_dotp / rerank = {rerank_dotp_time[batch_num][j] / rerank_time[batch_num][j] * 100:.2f}%\n"
+
+                            f"{'%' * 10}\n"
+                        )
+                        print(txt_to_print_q)
+                        with open(output_path, "a") as f:
+                            f.write(txt_to_print_q)
 
 
                 batch_total_time[batch_num] = (
@@ -239,25 +253,25 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                 txt_to_print = (
                     f"At the end of batch {batch_num} processing {batch_size} queries \n"
 
-                    f"\tbatch embedding time: {batch_embedding_time[batch_num]} ns ({batch_embedding_time[batch_num] / 1e9} s, ({batch_embedding_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
+                    f"\tbatch embedding time: {batch_embedding_time[batch_num]} ns ({batch_embedding_time[batch_num] / 1e9} s, ({batch_embedding_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
 
-                    f"\tSum of retrieval times: {batch_retrieval_time[batch_num]} ns ({batch_retrieval_time[batch_num] / 1e9} s, ({batch_retrieval_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
+                    f"\tSum of retrieval times: {batch_retrieval_time[batch_num]} ns ({batch_retrieval_time[batch_num] / 1e9} s, ({batch_retrieval_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
 
-                    f"\tSum of reranking time: {batch_rerank_time[batch_num]} ns ({batch_rerank_time[batch_num] / 1e9} s, ({batch_rerank_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
+                    f"\tSum of reranking time: {batch_rerank_time[batch_num]} ns ({batch_rerank_time[batch_num] / 1e9} s, ({batch_rerank_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
 
-                    f"\tSum of prompt times: {batch_prompt_time[batch_num]} ns ({batch_prompt_time[batch_num] / 1e9} s, ({batch_prompt_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
+                    f"\tSum of prompt times: {batch_prompt_time[batch_num]} ns ({batch_prompt_time[batch_num] / 1e9} s, ({batch_prompt_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
 
                     f"\tSum of generation times: {batch_generation_time[batch_num]} ns ({batch_generation_time[batch_num] / 1e9} s, ({batch_generation_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n" 
 
                     f"\t{'#' * 10}\n\tReranking storage time vs dotp time\n"
 
-                    f"\t\tMax rerank_storage times: {batch_rerank_storage_time[batch_num]} ns ({batch_rerank_storage_time[batch_num] / 1e9} s, ({batch_rerank_storage_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
+                    # f"\t\tMax rerank_storage times: {batch_rerank_storage_time[batch_num]} ns ({batch_rerank_storage_time[batch_num] / 1e9} s, ({batch_rerank_storage_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
 
-                    f"\t\tMax of rerank_dotp times: {batch_rerank_dotp_time[batch_num]} ns ({batch_rerank_dotp_time[batch_num] / 1e9} s, ({batch_rerank_dotp_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
+                    # f"\t\tMax of rerank_dotp times: {batch_rerank_dotp_time[batch_num]} ns ({batch_rerank_dotp_time[batch_num] / 1e9} s, ({batch_rerank_dotp_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%)\n"
                     
-                    f"\t\trerank_storage / rerank = {batch_rerank_storage_time[batch_num] / batch_rerank_time[batch_num] * 100:.2f}%\n"
+                    # f"\t\trerank_storage / rerank = {batch_rerank_storage_time[batch_num] / batch_rerank_time[batch_num] * 100:.2f}%\n"
 
-                    f"\t\trerank_dotp / rerank = {batch_rerank_dotp_time[batch_num] / batch_rerank_time[batch_num] * 100:.2f}%\n"
+                    # f"\t\trerank_dotp / rerank = {batch_rerank_dotp_time[batch_num] / batch_rerank_time[batch_num] * 100:.2f}%\n"
                 )
 
                 with open(output_path, "a") as f:
@@ -269,8 +283,8 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
             t_embedding_time = sum(batch_embedding_time)
             t_retrieval_time = sum(batch_retrieval_time)
             t_rerank_time = sum(batch_rerank_time)
-            t_rerank_storage_time = sum(batch_rerank_storage_time)
-            t_rerank_dop_time = sum(batch_rerank_dotp_time)
+            # t_rerank_storage_time = sum(batch_rerank_storage_time)
+            # t_rerank_dop_time = sum(batch_rerank_dotp_time)
             t_prompt_time = sum(batch_prompt_time)
             t_generation_time = sum(batch_generation_time)
             t_total_time = sum(batch_total_time)
@@ -281,13 +295,12 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     f"Retrieval: {t_retrieval_time} : {(100 * t_retrieval_time / t_total_time):.2f}%\n" +
                     f"Re-ranking: {t_rerank_time} : {(100 * t_rerank_time / t_total_time):.2f}%\n" +
 
-                    f"Re-ranking-storage: {t_rerank_time} : {(100 * t_rerank_storage_time / t_total_time):.2f}%\n" +
-                    f"Re-ranking-dotp: {t_rerank_time} : {(100 * t_rerank_dop_time / t_total_time):.2f}%\n" +
+                    # f"Re-ranking-storage: {t_rerank_time} : {(100 * t_rerank_storage_time / t_total_time):.2f}%\n" +
+                    # f"Re-ranking-dotp: {t_rerank_time} : {(100 * t_rerank_dop_time / t_total_time):.2f}%\n" +
 
-                    f"Re-ranking-storage / rerank: {t_rerank_time} : {(100 * t_rerank_storage_time / t_rerank_time):.2f}%\n" +
-                    f"Re-ranking-dotp / rerank: {t_rerank_time} : {(100 * t_rerank_dop_time / t_rerank_time):.2f}%\n" +
+                    # f"Re-ranking-storage / rerank: {t_rerank_time} : {(100 * t_rerank_storage_time / t_rerank_time):.2f}%\n" +
+                    # f"Re-ranking-dotp / rerank: {t_rerank_time} : {(100 * t_rerank_dop_time / t_rerank_time):.2f}%\n" +
 
-                    f"Re-ranking: {t_rerank_time} : {(100 * t_rerank_time / t_total_time):.2f}%\n" +
                     f"Prompt: {t_prompt_time} : {(100 * t_prompt_time / t_total_time):.2f}%\n" +
                     f"Generation: {t_generation_time} : {(100 * t_generation_time / t_total_time):.2f}%\n" +
                     f"Total: {t_total_time}\n" 
