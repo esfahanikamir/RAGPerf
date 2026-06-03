@@ -1,6 +1,10 @@
 from .BaseRetriever import *
 
 
+# Global timing dictionaries
+Storage_time = {}  # doc_id -> seconds spent fetching from DB
+DotP_time = {}     # doc_id -> seconds spent on dot product / similarity
+
 class AmirsRetriever(BaseRetriever):
     def __init__(
         self, collection_name, top_k=5, retrieval_batch_size=1, client: milvus_client = None
@@ -53,19 +57,33 @@ class AmirsRetriever(BaseRetriever):
         def rerank_single_doc(doc_id, data, client, collection_name):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             # here is the storage interaction part
+            t0 = time.monotonic_ns()
             doc_colbert_vecs = client.query(
                 collection_name=collection_name,
                 filter_expr=f"doc_id in ({doc_id})",
                 output_fields=["seq_id", "vector", "filepath"],
                 limit=1000,
             )
+            Storage_time[doc_id] = time.monotonic_ns() - t0
+            # here is the part for the dot product computation -> currently on CPU
+            t1 = time.monotonic_ns()
             if client.type == "lancedb":
                 doc_vecs = np.vstack(doc_colbert_vecs["vector"].to_list())
                 score = np.dot(data, doc_vecs.T).max(1).sum()
+                DotP_time[doc_id] = time.monotonic_ns() - t1
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])
+            
+            # elif client.type == "milvus":
+            #     doc_vecs = np.vstack([data["vector"] for data in doc_colbert_vecs])
+            #     tpl =  (score, doc_id, doc_colbert_vecs[0]["filepath"])
+            #     DotP_time[doc_id] = time.monotonic_ns() - t1
+            #     return tpl
             elif client.type == "milvus":
-                doc_vecs = np.vstack([data["vector"] for data in doc_colbert_vecs])
-                return (score, doc_id, doc_colbert_vecs[0]["filepath"])
+                doc_vecs = np.vstack([d["vector"] for d in doc_colbert_vecs])
+                score = np.dot(data, doc_vecs.T).max(1).sum()  # ← add this
+                tpl = (score, doc_id, doc_colbert_vecs[0]["filepath"])
+                DotP_time[doc_id] = time.monotonic_ns() - t1
+                return tpl
             else:
                 raise ValueError(f"Unsupported client type: {client.type}")
 
