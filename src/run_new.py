@@ -232,11 +232,13 @@ def main():
                     top_n=4
                 )
             elif type == "image_rerank":
+                # print(f'reranking device is {config["rag"]["reranking"]["device"]}')
                 retriever = AmirsRetriever(
                     collection_name=collection_name,
                     top_k=config["rag"]["retrieval"]["top_k"],
                     retrieval_batch_size=config["rag"]["retrieval"]["retrieval_batch_size"],
-                    client=db_client
+                    client=db_client,
+                    dotp_device = config["rag"]["reranking"]["device"]
                 )
             responser = ImageResponser(
                 model=config["rag"]["generation"]["model"],

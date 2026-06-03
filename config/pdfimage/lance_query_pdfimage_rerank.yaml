@@ -38,11 +38,13 @@ rag:
     question_num: 4
     retrieval_batch_size: 1
     top_k: 100
+    device: cuda:0
   reranking:
     # rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2 
     rerank_model: None
     top_n: 64
-    device: cuda:0 # not used actually as re-ranker uses dot product
+    # device: cuda:0 
+    device: cpu
   pipeline:
     batch_size: 1
 run_name: default_run
