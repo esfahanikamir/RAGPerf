@@ -213,6 +213,7 @@ def main():
                 )
                 log_time_breakdown("done")
         if config["rag"]["action"]["generation"] == True:
+            # only prepare the request objecyt for now
             RAGRequest = WikipediaRequests(
                 run_name=config["run_name"],
                 collection_name=collection_name,

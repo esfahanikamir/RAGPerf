@@ -1,14 +1,19 @@
+import resource
+import torch
+import threading
 from .BaseRetriever import *
 
 
 # Global timing dictionaries
 Storage_time = {}  # doc_id -> seconds spent fetching from DB
 DotP_time = {}     # doc_id -> seconds spent on dot product / similarity
+ProfilingStats = {}
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, top_k=5, retrieval_batch_size=1, client: milvus_client = None
+        self, collection_name, top_k=5, retrieval_batch_size=1, client: milvus_client = None, dotp_device = "cpu"
     ):
+        self.dotp_device = dotp_device
         super().__init__(
             collection_name = collection_name,
             top_k = top_k, 
@@ -53,24 +58,62 @@ class AmirsRetriever(BaseRetriever):
     
     def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
         scores = []
+        with open("out.out", "w") as f:
+            pass
 
-        def rerank_single_doc(doc_id, data, client, collection_name):
+        def rerank_single_doc(doc_id, data, client, collection_name, dotp_device):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             # here is the storage interaction part
             t0 = time.monotonic_ns()
+            usage_before = resource.getrusage(resource.RUSAGE_SELF)
             doc_colbert_vecs = client.query(
                 collection_name=collection_name,
                 filter_expr=f"doc_id in ({doc_id})",
                 output_fields=["seq_id", "vector", "filepath"],
                 limit=1000,
             )
+            # print(f"inside rerank_single_doc: len(doc_colbert_vecs = {len(doc_colbert_vecs)})")
             Storage_time[doc_id] = time.monotonic_ns() - t0
             # here is the part for the dot product computation -> currently on CPU
             t1 = time.monotonic_ns()
+            usage_after = resource.getrusage(resource.RUSAGE_SELF)
+            minor_faults = (
+                usage_after.ru_minflt -
+                usage_before.ru_minflt
+            )
+
+            major_faults = (
+                usage_after.ru_majflt -
+                usage_before.ru_majflt
+)
             if client.type == "lancedb":
                 doc_vecs = np.vstack(doc_colbert_vecs["vector"].to_list())
-                score = np.dot(data, doc_vecs.T).max(1).sum()
-                DotP_time[doc_id] = time.monotonic_ns() - t1
+
+                if dotp_device == "cpu":
+                    score = np.dot(data, doc_vecs.T).max(1).sum()
+                elif dotp_device.startswith("cuda"):
+                    data_tensor    = torch.tensor(data, device="cuda", dtype=torch.float32)
+                    doc_vecs_tensor = torch.tensor(doc_vecs, device="cuda", dtype=torch.float32)
+                    score = torch.matmul(data_tensor, doc_vecs_tensor.T).max(1).values.sum().item()
+                else:
+                    raise ValueError(f"Unsupported dotp_device: {dotp_device}")
+                t2 = time.monotonic_ns()
+                DotP_time[doc_id] = t2 - t1
+
+                ProfilingStats[doc_id] = {
+                    "thread_id": threading.get_ident(),
+                    "storage_time_ns": Storage_time[doc_id],
+                    "compute_time_ns": DotP_time[doc_id],
+                    "num_patches": len(doc_colbert_vecs),
+                    "query_tokens": data.shape[0],
+                    "embedding_dim": 128,
+                    "fetched_bytes":
+                        len(doc_colbert_vecs) * 128 * 4,
+                    "total_rerank_time": t2 - t0,
+                    "minor_faults": minor_faults,
+                    "major_faults": major_faults
+                }
+                # print(f"doc_id = {doc_id}, num_patches = {len(doc_colbert_vecs)}, storage_time = {Storage_time[doc_id]}, dotp_time = {DotP_time[doc_id]}")        
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])
             
             # elif client.type == "milvus":
@@ -80,17 +123,44 @@ class AmirsRetriever(BaseRetriever):
             #     return tpl
             elif client.type == "milvus":
                 doc_vecs = np.vstack([d["vector"] for d in doc_colbert_vecs])
-                score = np.dot(data, doc_vecs.T).max(1).sum()  # ← add this
-                tpl = (score, doc_id, doc_colbert_vecs[0]["filepath"])
+                
+                if dotp_device == "cpu":
+                    score = np.dot(data, doc_vecs.T).max(1).sum()
+                elif dotp_device == "cuda":
+                    data_tensor     = torch.tensor(data,     device="cuda", dtype=torch.float32)
+                    doc_vecs_tensor = torch.tensor(doc_vecs, device="cuda", dtype=torch.float32)
+                    score = torch.matmul(data_tensor, doc_vecs_tensor.T).max(1).values.sum().item()
+                else:
+                    raise ValueError(f"Unsupported dotp_device: {dotp_device}")
+                
                 DotP_time[doc_id] = time.monotonic_ns() - t1
+
+                ProfilingStats[doc_id] = {
+                    "thread_id": threading.get_ident(),
+
+                    "storage_time_ns": Storage_time[doc_id],
+                    "compute_time_ns": DotP_time[doc_id],
+
+                    "num_patches": len(doc_colbert_vecs),
+
+                    "query_tokens": data.shape[0],
+
+                    "embedding_dim": 128,
+
+                    "fetched_bytes":
+                        len(doc_colbert_vecs) * 128 * 4,
+                }
+                tpl = (score, doc_id, doc_colbert_vecs[0]["filepath"])
                 return tpl
             else:
                 raise ValueError(f"Unsupported client type: {client.type}")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.top_k) as executor:
+
             futures = {
                 executor.submit(
-                    rerank_single_doc, doc_id, query_embeddings, self.client, self.collection_name
+                    rerank_single_doc, doc_id, query_embeddings, self.client, self.collection_name, self.dotp_device
                 ): doc_id
                 for doc_id in top_k_results
             }

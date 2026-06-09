@@ -38,7 +38,7 @@ sys:
     gpu_count: 2
     gpus:
     - cuda:0
-    - cuda:1
+    # - cuda:1
   log:
     metrics_log: ./log/default_run.log
   vector_db:

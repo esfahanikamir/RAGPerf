@@ -9,7 +9,7 @@ from encoder.sentenceTransformerEncoder import SentenceTransformerEncoder
 from RAGPipeline.retriever.BaseRetriever import BaseRetriever
 
 from RAGPipeline.retriever.Amirs_Retriever import AmirsRetriever  
-from RAGPipeline.retriever.Amirs_Retriever import Storage_time, DotP_time  
+from RAGPipeline.retriever.Amirs_Retriever import Storage_time, DotP_time, ProfilingStats  
 
 
 from RAGPipeline.reranker.CrossEncoderReranker import CrossEncoderReranker
@@ -159,6 +159,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
                         Storage_time.clear()
                         DotP_time.clear()
+                        ProfilingStats.clear()
 
                         results = self.retriever.pdfimage_rerank(
                             query_embeddings = query,
@@ -173,7 +174,25 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         rerank_storage_time_q = max(Storage_time.values()) if Storage_time else 0
                         rerank_dotp_time_q    = max(DotP_time.values())    if DotP_time    else 0
 
+                        with open(output_path, "a") as f:
+                            f.write(f"\n===== Query {j} Batch {batch_num} =====\n")
+
+                            for doc_id, stats in sorted(ProfilingStats.items()):
+
+                                f.write(
+                                    f"doc={doc_id} "
+                                    f"patches={stats['num_patches']} "
+                                    f"tokens={stats['query_tokens']} "
+                                    f"storage={stats['storage_time_ns']/1e6:.3f}ms "
+                                    f"compute={stats['compute_time_ns']/1e6:.3f}ms "
+                                    f"KB={stats['fetched_bytes']/1024:.1f} "
+                                    f"total_rerank_time={stats['total_rerank_time']/1e6:.3f}\n"
+                                    f"minor_faults={stats['minor_faults']} "
+                                    f"major_faults={stats['major_faults']}\n"
+                                )
+
                         cprint.iprintf(f"*** Reranking done")
+                        
 
                     # augment
                     log_time_breakdown("prompt")
