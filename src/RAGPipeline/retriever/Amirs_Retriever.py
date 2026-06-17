@@ -6,9 +6,10 @@ from .BaseRetriever import *
 
 # Global timing dictionaries
 Storage_time = {}  # doc_id -> seconds spent fetching from DB
+np_time = {}
 DotP_time = {}     # doc_id -> seconds spent on dot product / similarity
 ProfilingStats = {} # per thread
-per_process_io_stat = {} # per whole process
+# per_process_io_stat = {} # per whole process
 
 def get_process_io():
     stats = {}
@@ -65,14 +66,14 @@ class AmirsRetriever(BaseRetriever):
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
             # search_params=search_params,
         )
-        print(f"inside search_db_image -> len(results) = {len(results)}")
+        print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")
         return results
     
     def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
         # print(f"len(top_k_results) = {len(top_k_results)}")
         scores = []
-        with open("out.out", "w") as f:
-            pass
+        # with open("out.out", "w") as f:
+        #     pass
 
         def rerank_single_doc(doc_id, data, client, collection_name, dotp_device):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
@@ -85,33 +86,40 @@ class AmirsRetriever(BaseRetriever):
                 limit=1000,
             )
             # print(f"inside rerank_single_doc: len(doc_colbert_vecs = {len(doc_colbert_vecs)})")
-            Storage_time[doc_id] = time.monotonic_ns() - t0
-            # here is the part for the dot product computation -> currently on CPU
             t1 = time.monotonic_ns()
+            Storage_time[doc_id] = t1 - t0
+            # here is the part for the dot product computation -> currently on CPU
             if client.type == "lancedb":
+                t2 = time.monotonic_ns()
                 doc_vecs = np.vstack(doc_colbert_vecs["vector"].to_list())
+                t3 = time.monotonic_ns()
+                np_time[doc_id] = t3 - t2
 
                 if dotp_device == "cpu":
+                    t4 = time.monotonic_ns()
                     score = np.dot(data, doc_vecs.T).max(1).sum()
-                elif dotp_device.startswith("cuda"):
-                    data_tensor    = torch.tensor(data, device="cuda", dtype=torch.float32)
-                    doc_vecs_tensor = torch.tensor(doc_vecs, device="cuda", dtype=torch.float32)
-                    score = torch.matmul(data_tensor, doc_vecs_tensor.T).max(1).values.sum().item()
+                    t5 = time.monotonic_ns()
+                    DotP_time[doc_id] = t5 - t4
+                # not for now
+                # elif dotp_device.startswith("cuda"):
+                #     t1 = time.monotonic_ns()
+                #     data_tensor    = torch.tensor(data, device="cuda", dtype=torch.float32)
+                #     doc_vecs_tensor = torch.tensor(doc_vecs, device="cuda", dtype=torch.float32)
+                #     score = torch.matmul(data_tensor, doc_vecs_tensor.T).max(1).values.sum().item()
                 else:
                     raise ValueError(f"Unsupported dotp_device: {dotp_device}")
-                t2 = time.monotonic_ns()
-                DotP_time[doc_id] = t2 - t1
 
                 ProfilingStats[doc_id] = {
                     "thread_id": threading.get_ident(),
                     "storage_time_ns": Storage_time[doc_id],
-                    "compute_time_ns": DotP_time[doc_id],
+                    "numpy_time_ns": np_time[doc_id],
+                    "dotp_time_ns": DotP_time[doc_id],
                     "num_patches": len(doc_colbert_vecs),
-                    "query_tokens": data.shape[0],
+                    "num_query_tokens": data.shape[0],
                     "embedding_dim": 128,
                     "fetched_bytes":
                         len(doc_colbert_vecs) * 128 * 4,
-                    "total_rerank_time": t2 - t0
+                    "total_rerank_time": t5 - t0
                 }
                 # print(f"doc_id = {doc_id}, num_patches = {len(doc_colbert_vecs)}, storage_time = {Storage_time[doc_id]}, dotp_time = {DotP_time[doc_id]}")        
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])
@@ -133,31 +141,14 @@ class AmirsRetriever(BaseRetriever):
                 else:
                     raise ValueError(f"Unsupported dotp_device: {dotp_device}")
                 
-                DotP_time[doc_id] = time.monotonic_ns() - t1
-
-                ProfilingStats[doc_id] = {
-                    "thread_id": threading.get_ident(),
-
-                    "storage_time_ns": Storage_time[doc_id],
-                    "compute_time_ns": DotP_time[doc_id],
-
-                    "num_patches": len(doc_colbert_vecs),
-
-                    "query_tokens": data.shape[0],
-
-                    "embedding_dim": 128,
-
-                    "fetched_bytes":
-                        len(doc_colbert_vecs) * 128 * 4,
-                }
                 tpl = (score, doc_id, doc_colbert_vecs[0]["filepath"])
                 return tpl
             else:
                 raise ValueError(f"Unsupported client type: {client.type}")
 
         # per process profiling pagefaults + io
-        io_before = get_process_io()
-        usage_before = resource.getrusage(resource.RUSAGE_SELF)
+        # io_before = get_process_io()
+        # usage_before = resource.getrusage(resource.RUSAGE_SELF)
 
         # fix it
         # max_docs = 16
@@ -165,8 +156,8 @@ class AmirsRetriever(BaseRetriever):
         # top_k_results = top_k_results[:max_docs]
 
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
-        # with concurrent.futures.ThreadPoolExecutor(max_workers=len(top_k_results)) as executor:
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
 
             futures = {
                 executor.submit(
@@ -178,18 +169,18 @@ class AmirsRetriever(BaseRetriever):
                 score, doc_id, filepath = future.result()
                 scores.append((score, doc_id, filepath))
 
-        io_after = get_process_io()
-        usage_after = resource.getrusage(resource.RUSAGE_SELF)
+        # io_after = get_process_io()
+        # usage_after = resource.getrusage(resource.RUSAGE_SELF)
 
-        minor_faults = usage_after.ru_minflt - usage_before.ru_minflt
-        major_faults = usage_after.ru_majflt - usage_before.ru_majflt
-        read_bytes = io_after["read_bytes"] - io_before["read_bytes"]   
-        syscr = io_after["syscr"] - io_before["syscr"]
+        # minor_faults = usage_after.ru_minflt - usage_before.ru_minflt
+        # major_faults = usage_after.ru_majflt - usage_before.ru_majflt
+        # read_bytes = io_after["read_bytes"] - io_before["read_bytes"]   
+        # syscr = io_after["syscr"] - io_before["syscr"]
 
-        per_process_io_stat["minor_faults"] = minor_faults
-        per_process_io_stat["major_faults"]= major_faults
-        per_process_io_stat["read_bytes"]= read_bytes
-        per_process_io_stat["syscr"]= syscr
+        # per_process_io_stat["minor_faults"] = minor_faults
+        # per_process_io_stat["major_faults"]= major_faults
+        # per_process_io_stat["read_bytes"]= read_bytes
+        # per_process_io_stat["syscr"]= syscr
         
         scores.sort(key=lambda x: x[0], reverse=True)
 

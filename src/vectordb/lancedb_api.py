@@ -248,6 +248,7 @@ class lance_client(DBInstance):
                     .to_list()
                 )
                 # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()
+                # here it shows that the retriever searches for top_k mathces for each query token
                 if len(b_results) != len(b_vectors) * topk:
                     raise ValueError(
                         f"len(b_results) must be n*topk n = {search_batch_size}, topk {topk}, but got {len(b_results)}"
@@ -274,12 +275,15 @@ class lance_client(DBInstance):
 
         # end_time = time.time()
         doc_ids = set()
+        # here it shows that a union of all the top_k matches of all the tokens will be returned as the result
         with open("query.out", "w") as fout:
             for query_results in results:
                 for result in query_results:
                     doc_ids.add(result["doc_id"])
 
         print(f"***Query search completed.")
+        # The outputs are the doc_ids only -> nothing more implemented although 
+        # there is too much in the function parameters
         return doc_ids
 
     def query(self, collection_name, filter_expr, output_fields=None, limit=10):

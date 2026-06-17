@@ -35,7 +35,7 @@ run_name: default_run
 sys:
   devices:
     cpu: cpu
-    gpu_count: 2
+    gpu_count: 1
     gpus:
     - cuda:0
     # - cuda:1

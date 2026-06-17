@@ -9,7 +9,9 @@ from encoder.sentenceTransformerEncoder import SentenceTransformerEncoder
 from RAGPipeline.retriever.BaseRetriever import BaseRetriever
 
 from RAGPipeline.retriever.Amirs_Retriever import AmirsRetriever  
-from RAGPipeline.retriever.Amirs_Retriever import Storage_time, DotP_time, ProfilingStats, per_process_io_stat  
+from RAGPipeline.retriever.Amirs_Retriever import Storage_time, DotP_time, ProfilingStats
+# from RAGPipeline.retriever.Amirs_Retriever import  per_process_io_stat   
+
 
 
 
@@ -57,20 +59,25 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
     #     return chat_template
 
     def process(self, request, batch_size=2) -> None:
-        global Storage_time, DotP_time, ProfilingStats, per_process_io_stat
+        global Storage_time, DotP_time, ProfilingStats
+        global per_process_io_stat  
         # ToDo: evict cache to get the page faults      
         if request.req_type == "query":
             cprint.iprintf(
                 f"*** Processing {request.req_count} questions with batch size {batch_size}"
             )
             output_path = os.path.join(Logger().log_dirpath, "text_pipeline_stats.txt")
+            prompt_path = os.path.join(Logger().log_dirpath, "prompts.out")
+            response_path = os.path.join(Logger().log_dirpath, "responses.out")
+            questions_path = os.path.join(Logger().log_dirpath, "questions.out")
+            
             with open(output_path, "w") as f:
                 pass
-            with open("prompts.out", "w") as f:
+            with open(prompt_path, "w") as f:
                 pass
-            with open("responses.out", "w") as f:
+            with open(response_path, "w") as f:
                 pass
-            with open("questions.out", "w") as f:
+            with open(questions_path, "w") as f:
                 pass
 
 
@@ -87,7 +94,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
             # for now let us assume that the number of questions is devisible by the batch size
             nrounds = int(math.ceil(request.req_count / batch_size))
-            cprint.iprintf(f"*** Will run {nrounds} rounds")
+            cprint.iprintf(f"*** Will run {nrounds} rounds(bathces)")
             # dead piece of code for the for loop
             # for round_idx in range(0, nrounds):
             #     start_sample_idx = round_idx * batch_size
@@ -116,13 +123,15 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
             batch_total_time = [0] * nrounds
 
+            # for each batch
             for i in range(0, request.req_count, batch_size):
                 batch_num = i // batch_size
+                # gets {batch-size} questions
                 questions, gt_answer = request.get_questions(batch_size, start_idx=i)
 
-                print(f"there are {len(questions)} questoins for round {batch_num}")
+                print(f"there are {len(questions)} questoins for batch {batch_num}/{nrounds}")
                 # print(f"questions for this round:\n {questions}")
-                with open("questions.out", "a") as f:
+                with open(questions_path, "a") as f:
                     f.write(f"batch #{batch_num}\n")
                     for qindex, question in enumerate(questions):
                         f.write(f"question #{qindex}\n{question}\n")
@@ -132,14 +141,18 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                 # self.embedder.load_encoder()
                 log_time_breakdown("embed")
                 embedding_start_time = time.monotonic_ns()
+                # embedds a batch of questions (with colpali)
                 vectors = self.embedder.embedding_query(questions)
-                print(f"len(vectors) = {len(vectors)}")
                 embedding_end_time = time.monotonic_ns()
+                print(f"len(vectors) = {len(vectors)}")
+                for i, vector in enumerate(vectors):
+                    print(f"vector {i}/total {len(vectors) - 1}\ntype {type(vector)}\nlen(this vector = {len(vector)})")
                 # self.embedder.free_encoder()
                 cprint.iprintf(f"*** Embedding done")
 
                 batch_embedding_time[batch_num] = embedding_end_time - embedding_start_time
 
+                # for each question(its embedding is called query now) in a batch of questions
                 for j, query in enumerate(vectors):
                     # print(f"query = {query}")
                     query = query.float().numpy()
@@ -153,13 +166,13 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     # Rerank Added by Amir
                     if self.reranker is not None:
                         cprint.iprintf(
-                            f"*** Reranking top-{self.reranker.top_n} from {len(results)} candidate image pages from top {self.retriever.top_k} retrieved pathces"
+                            f"*** Reranking top-{self.reranker.top_n} from {len(results)} candidate image pages (top_k = {self.retriever.top_k})"
                         )
 
                         Storage_time.clear()
                         DotP_time.clear()
                         ProfilingStats.clear()
-                        per_process_io_stat.clear()
+                        # per_process_io_stat.clear()
                         log_time_breakdown("rerank")
                         rerank_start_time = time.monotonic_ns()
                         # print(f"results:\n {results}")
@@ -182,25 +195,28 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                             f.write(f"\n===== Query {j} Batch {batch_num} =====\n")
 
                             for doc_id, stats in sorted(ProfilingStats.items()):
-
+                                counter = 1
                                 f.write(
-                                    f"Thread_id={stats['thread_id']}"
+                                    f"{counter} "
+                                    f"Thread_id={stats['thread_id']} "
                                     f"doc={doc_id} "
                                     f"patches={stats['num_patches']} "
                                     f"tokens={stats['query_tokens']} "
                                     f"storage={stats['storage_time_ns']/1e6:.3f}ms "
-                                    f"compute={stats['compute_time_ns']/1e6:.3f}ms "
+                                    f"CPU_numpy ={stats['numpy_time_ns']/1e6:.3f}ms "
+                                    f"dotp_time_ns ={stats['dotp_time_ns']/1e6:.3f}ms "
                                     f"KB={stats['fetched_bytes']/1024:.1f} "
                                     f"total_rerank_time={stats['total_rerank_time']/1e6:.3f}\n"
                                 )
+                                counter += 1
 
-                            f.write(f"\n{'$' * 20}\n"
-                                    f"minor_faults={per_process_io_stat['minor_faults']} "
-                                    f"major_faults={per_process_io_stat['major_faults']}\n"
-                                    f"read_bytes={per_process_io_stat['read_bytes']/1024:.1f}KB\n"
-                                    f"syscr={per_process_io_stat['syscr']}\n"
-                                    f"\n{'$' * 20}\n"
-                                    )
+                            # f.write(f"\n{'$' * 20}\n"
+                            #         f"minor_faults={per_process_io_stat['minor_faults']} "
+                            #         f"major_faults={per_process_io_stat['major_faults']}\n"
+                            #         f"read_bytes={per_process_io_stat['read_bytes']/1024:.1f}KB\n"
+                            #         f"syscr={per_process_io_stat['syscr']}\n"
+                            #         f"\n{'$' * 20}\n"
+                            #         )
                         cprint.iprintf(f"*** Reranking done")
                         
 
@@ -210,10 +226,10 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     prompts = self.generate_prompt(questions[j], results)
                     prompt_end_time = time.monotonic_ns()
                     cprint.iprintf(f"*** Prompt generation done")
-                    with open("prompts.out", "a") as fout:
+                    with open(prompt_path, "a") as fout:
                         for idx, prompt in enumerate(prompts):
                             # there is always only one f... prompt
-                            fout.write(f"=== Prompt {idx} for batch {batch_num}\nquestion #{j}:\n{questions[j]} ===\n")
+                            fout.write(f"\n=== Prompt {idx} for batch {batch_num}\nquestion #{j}:\n{questions[j]} ===\n")
                             fout.write(str(prompt) + "\n\n")
 
                     # generation
@@ -227,10 +243,10 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     cprint.iprintf(f"*** Generation done")
 
                     # with open("response.out", "w") as fout:
-                    with open("responses.out", "a", encoding='utf-8') as fout:
+                    with open(response_path, "a", encoding='utf-8') as fout:
                         for idx, response in enumerate(responses):
                             # there should be only one response for that one prompt I feel
-                            fout.write(f"=== response {idx} for batch {batch_num}\nquestion #{j}:\n{questions[j]}===\n")
+                            fout.write(f"\n=== response {idx} for batch {batch_num}\nquestion #{j}:\n{questions[j]}===\n")
                             fout.write(response.strip() + "\n\n")
                     
                     retrieval_time[batch_num][j] = retrieval_end_time - retrieval_start_time
