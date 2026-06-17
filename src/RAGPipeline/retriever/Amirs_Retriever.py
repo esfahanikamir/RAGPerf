@@ -7,11 +7,22 @@ from .BaseRetriever import *
 # Global timing dictionaries
 Storage_time = {}  # doc_id -> seconds spent fetching from DB
 DotP_time = {}     # doc_id -> seconds spent on dot product / similarity
-ProfilingStats = {}
+ProfilingStats = {} # per thread
+per_process_io_stat = {} # per whole process
+
+def get_process_io():
+    stats = {}
+
+    with open("/proc/self/io", "r") as f:
+        for line in f:
+            key, value = line.split(":")
+            stats[key.strip()] = int(value.strip())
+
+    return stats
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, top_k=5, retrieval_batch_size=1, client: milvus_client = None, dotp_device = "cpu"
+        self, collection_name, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu"
     ):
         self.dotp_device = dotp_device
         super().__init__(
@@ -54,9 +65,11 @@ class AmirsRetriever(BaseRetriever):
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
             # search_params=search_params,
         )
+        print(f"inside search_db_image -> len(results) = {len(results)}")
         return results
     
     def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
+        # print(f"len(top_k_results) = {len(top_k_results)}")
         scores = []
         with open("out.out", "w") as f:
             pass
@@ -65,7 +78,6 @@ class AmirsRetriever(BaseRetriever):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             # here is the storage interaction part
             t0 = time.monotonic_ns()
-            usage_before = resource.getrusage(resource.RUSAGE_SELF)
             doc_colbert_vecs = client.query(
                 collection_name=collection_name,
                 filter_expr=f"doc_id in ({doc_id})",
@@ -76,16 +88,6 @@ class AmirsRetriever(BaseRetriever):
             Storage_time[doc_id] = time.monotonic_ns() - t0
             # here is the part for the dot product computation -> currently on CPU
             t1 = time.monotonic_ns()
-            usage_after = resource.getrusage(resource.RUSAGE_SELF)
-            minor_faults = (
-                usage_after.ru_minflt -
-                usage_before.ru_minflt
-            )
-
-            major_faults = (
-                usage_after.ru_majflt -
-                usage_before.ru_majflt
-)
             if client.type == "lancedb":
                 doc_vecs = np.vstack(doc_colbert_vecs["vector"].to_list())
 
@@ -109,9 +111,7 @@ class AmirsRetriever(BaseRetriever):
                     "embedding_dim": 128,
                     "fetched_bytes":
                         len(doc_colbert_vecs) * 128 * 4,
-                    "total_rerank_time": t2 - t0,
-                    "minor_faults": minor_faults,
-                    "major_faults": major_faults
+                    "total_rerank_time": t2 - t0
                 }
                 # print(f"doc_id = {doc_id}, num_patches = {len(doc_colbert_vecs)}, storage_time = {Storage_time[doc_id]}, dotp_time = {DotP_time[doc_id]}")        
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])
@@ -155,8 +155,18 @@ class AmirsRetriever(BaseRetriever):
             else:
                 raise ValueError(f"Unsupported client type: {client.type}")
 
-        # with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.top_k) as executor:
+        # per process profiling pagefaults + io
+        io_before = get_process_io()
+        usage_before = resource.getrusage(resource.RUSAGE_SELF)
+
+        # fix it
+        # max_docs = 16
+        # top_k_results = list(top_k_results)
+        # top_k_results = top_k_results[:max_docs]
+
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=len(top_k_results)) as executor:
 
             futures = {
                 executor.submit(
@@ -168,6 +178,19 @@ class AmirsRetriever(BaseRetriever):
                 score, doc_id, filepath = future.result()
                 scores.append((score, doc_id, filepath))
 
+        io_after = get_process_io()
+        usage_after = resource.getrusage(resource.RUSAGE_SELF)
+
+        minor_faults = usage_after.ru_minflt - usage_before.ru_minflt
+        major_faults = usage_after.ru_majflt - usage_before.ru_majflt
+        read_bytes = io_after["read_bytes"] - io_before["read_bytes"]   
+        syscr = io_after["syscr"] - io_before["syscr"]
+
+        per_process_io_stat["minor_faults"] = minor_faults
+        per_process_io_stat["major_faults"]= major_faults
+        per_process_io_stat["read_bytes"]= read_bytes
+        per_process_io_stat["syscr"]= syscr
+        
         scores.sort(key=lambda x: x[0], reverse=True)
 
         def GetPDF(filepath):

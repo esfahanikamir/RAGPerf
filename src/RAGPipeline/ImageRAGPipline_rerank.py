@@ -9,7 +9,8 @@ from encoder.sentenceTransformerEncoder import SentenceTransformerEncoder
 from RAGPipeline.retriever.BaseRetriever import BaseRetriever
 
 from RAGPipeline.retriever.Amirs_Retriever import AmirsRetriever  
-from RAGPipeline.retriever.Amirs_Retriever import Storage_time, DotP_time, ProfilingStats  
+from RAGPipeline.retriever.Amirs_Retriever import Storage_time, DotP_time, ProfilingStats, per_process_io_stat  
+
 
 
 from RAGPipeline.reranker.CrossEncoderReranker import CrossEncoderReranker
@@ -56,7 +57,8 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
     #     return chat_template
 
     def process(self, request, batch_size=2) -> None:
-        global Storage_time, DotP_time
+        global Storage_time, DotP_time, ProfilingStats, per_process_io_stat
+        # ToDo: evict cache to get the page faults      
         if request.req_type == "query":
             cprint.iprintf(
                 f"*** Processing {request.req_count} questions with batch size {batch_size}"
@@ -151,15 +153,17 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     # Rerank Added by Amir
                     if self.reranker is not None:
                         cprint.iprintf(
-                            f"*** Reranking top-{self.reranker.top_n} from {self.retriever.top_k} candidates"
+                            f"*** Reranking top-{self.reranker.top_n} from {len(results)} candidate image pages from top {self.retriever.top_k} retrieved pathces"
                         )
-                        log_time_breakdown("rerank")
-                        rerank_start_time = time.monotonic_ns()
-                        # print(f"results:\n {results}")
 
                         Storage_time.clear()
                         DotP_time.clear()
                         ProfilingStats.clear()
+                        per_process_io_stat.clear()
+                        log_time_breakdown("rerank")
+                        rerank_start_time = time.monotonic_ns()
+                        # print(f"results:\n {results}")
+
 
                         results = self.retriever.pdfimage_rerank(
                             query_embeddings = query,
@@ -171,8 +175,8 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         # self.reranker.free_reranker()
 
                         # get the separate storage time and the dotproduct time
-                        rerank_storage_time_q = max(Storage_time.values()) if Storage_time else 0
-                        rerank_dotp_time_q    = max(DotP_time.values())    if DotP_time    else 0
+                        # rerank_storage_time_q = max(Storage_time.values()) if Storage_time else 0
+                        # rerank_dotp_time_q    = max(DotP_time.values())    if DotP_time    else 0
 
                         with open(output_path, "a") as f:
                             f.write(f"\n===== Query {j} Batch {batch_num} =====\n")
@@ -180,6 +184,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                             for doc_id, stats in sorted(ProfilingStats.items()):
 
                                 f.write(
+                                    f"Thread_id={stats['thread_id']}"
                                     f"doc={doc_id} "
                                     f"patches={stats['num_patches']} "
                                     f"tokens={stats['query_tokens']} "
@@ -187,10 +192,15 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                                     f"compute={stats['compute_time_ns']/1e6:.3f}ms "
                                     f"KB={stats['fetched_bytes']/1024:.1f} "
                                     f"total_rerank_time={stats['total_rerank_time']/1e6:.3f}\n"
-                                    f"minor_faults={stats['minor_faults']} "
-                                    f"major_faults={stats['major_faults']}\n"
                                 )
 
+                            f.write(f"\n{'$' * 20}\n"
+                                    f"minor_faults={per_process_io_stat['minor_faults']} "
+                                    f"major_faults={per_process_io_stat['major_faults']}\n"
+                                    f"read_bytes={per_process_io_stat['read_bytes']/1024:.1f}KB\n"
+                                    f"syscr={per_process_io_stat['syscr']}\n"
+                                    f"\n{'$' * 20}\n"
+                                    )
                         cprint.iprintf(f"*** Reranking done")
                         
 
@@ -229,8 +239,8 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     # rerank_time[batch_num][j] = 0
                     if self.reranker is not None:
                         rerank_time[batch_num][j] = rerank_end_time - rerank_start_time
-                        rerank_storage_time[batch_num][j] = rerank_storage_time_q
-                        rerank_dotp_time[batch_num][j] = rerank_dotp_time_q
+                        # rerank_storage_time[batch_num][j] = rerank_storage_time_q
+                        # rerank_dotp_time[batch_num][j] = rerank_dotp_time_q
                     else:
                         rerank_time[batch_num][j] = 0
                         rerank_storage_time[batch_num][j] = 0
@@ -250,9 +260,9 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         txt_to_print_q = (
                             f"Batch {batch_num} query {j}/{batch_size - 1} queries \n"
 
-                            f"\t\tMax rerank_storage / rerank = {rerank_storage_time[batch_num][j] / rerank_time[batch_num][j] * 100:.2f}%\n"
+                            # f"\t\tMax rerank_storage / rerank = {rerank_storage_time[batch_num][j] / rerank_time[batch_num][j] * 100:.2f}%\n"
 
-                            f"\t\tMaxr rerank_dotp / rerank = {rerank_dotp_time[batch_num][j] / rerank_time[batch_num][j] * 100:.2f}%\n"
+                            # f"\t\tMaxr rerank_dotp / rerank = {rerank_dotp_time[batch_num][j] / rerank_time[batch_num][j] * 100:.2f}%\n"
 
                             f"{'%' * 10}\n"
                         )

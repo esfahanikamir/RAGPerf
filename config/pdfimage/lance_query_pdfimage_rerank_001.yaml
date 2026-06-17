@@ -5,7 +5,7 @@ bench:
     chunk_overlap: 0
     chunk_size: 512
     chunktype: length
-    dataset_ratio: 0.0001 # defines the data set size, what fraction of the data set items to be downloaded
+    dataset_ratio: 0.001
 rag:
   action:
     preprocess: false
@@ -29,7 +29,7 @@ rag:
     load: false
   insert:
     batch_size: 512
-    collection_name: ''
+    collection_name: 'lance_image_test_001'
     drop_previous_collection: false
   generation:
     device: cuda:0
@@ -37,12 +37,12 @@ rag:
   retrieval:
     question_num: 4
     retrieval_batch_size: 1
-    top_k: 1
+    top_k: 16
     device: cuda:0
   reranking:
     # rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2 
     rerank_model: None
-    top_n: 1
+    top_n: 4
     # device: cuda:0 
     device: cpu
   pipeline:
@@ -57,7 +57,7 @@ sys:
   log:
     metrics_log: ./log/default_run.log
   vector_db:
-    collection_name: 'lance_image_test' 
+    collection_name: 'lance_image_test_001'
     # db_path: /mnt/data1/yuanxu4/lancedb # local path for lance db
     db_path: /local/amirk/RAGPerf/RAGPerf_dbs/lance_pdfimage # local path for lance db
     db_token: 
