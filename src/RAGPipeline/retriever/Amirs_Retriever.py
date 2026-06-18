@@ -5,7 +5,7 @@ from .BaseRetriever import *
 
 
 # Global timing dictionaries
-Storage_time = {}  # doc_id -> seconds spent fetching from DB
+data_fetch_time = {}  # doc_id -> seconds spent fetching from DB
 np_time = {}
 DotP_time = {}     # doc_id -> seconds spent on dot product / similarity
 ProfilingStats = {} # per thread
@@ -87,7 +87,7 @@ class AmirsRetriever(BaseRetriever):
             )
             # print(f"inside rerank_single_doc: len(doc_colbert_vecs = {len(doc_colbert_vecs)})")
             t1 = time.monotonic_ns()
-            Storage_time[doc_id] = t1 - t0
+            data_fetch_time[doc_id] = t1 - t0
             # here is the part for the dot product computation -> currently on CPU
             if client.type == "lancedb":
                 t2 = time.monotonic_ns()
@@ -111,7 +111,7 @@ class AmirsRetriever(BaseRetriever):
 
                 ProfilingStats[doc_id] = {
                     "thread_id": threading.get_ident(),
-                    "storage_time_ns": Storage_time[doc_id],
+                    "data_fetch_time_ns": data_fetch_time[doc_id],
                     "numpy_time_ns": np_time[doc_id],
                     "dotp_time_ns": DotP_time[doc_id],
                     "num_patches": len(doc_colbert_vecs),
@@ -121,7 +121,7 @@ class AmirsRetriever(BaseRetriever):
                         len(doc_colbert_vecs) * 128 * 4,
                     "total_rerank_time": t5 - t0
                 }
-                # print(f"doc_id = {doc_id}, num_patches = {len(doc_colbert_vecs)}, storage_time = {Storage_time[doc_id]}, dotp_time = {DotP_time[doc_id]}")        
+                # print(f"doc_id = {doc_id}, num_patches = {len(doc_colbert_vecs)}, data_fetch_time = {data_fetch_time[doc_id]}, dotp_time = {DotP_time[doc_id]}")        
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])
             
             # elif client.type == "milvus":

@@ -20,7 +20,8 @@ rag:
     index_type: IVF_HNSW_SQ
     metric_type: L2
   embedding:
-    device: cuda:0  
+    # device: cuda:0 
+    device: cpu 
     sentence_transformers_name: vidore/colpali-v1.2
     batch_size: 1024
     embedding_framework: sentence_transformers
@@ -33,6 +34,7 @@ rag:
     drop_previous_collection: false
   generation:
     device: cuda:0
+    dont_answer: true 
     model: Qwen/Qwen2-VL-7B-Instruct
   retrieval:
     question_num: 2

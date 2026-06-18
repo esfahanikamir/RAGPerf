@@ -179,7 +179,7 @@ def main():
                 cprint.iprintf(f"*** Start embedding images, time : {time.monotonic_ns()}")
                 log_time_breakdown("embed")
                 embedder = ColPaliEncoder(
-                    device="cuda:0",
+                    device=config["rag"]["embedding"]["device"],
                     model_name=config["rag"]["embedding"]["sentence_transformers_name"],
                     embedding_batch_size=config["rag"]["embedding"]["batch_size"],
                 )
@@ -246,7 +246,7 @@ def main():
                 device=config["rag"]["generation"]["device"],
             )
             embedder = ColPaliEncoder(
-                device="cuda:0",
+                device=config["rag"]["embedding"]["device"],
                 model_name=config["rag"]["embedding"]["sentence_transformers_name"],
                 embedding_batch_size=config["rag"]["embedding"]["batch_size"],
             )
@@ -283,6 +283,7 @@ def main():
                 RAGPipline.process(
                     RAGRequest,
                     batch_size=config["rag"]["pipeline"]["batch_size"],
+                    dont_answer = config["rag"]["generation"]["dont_answer"]
                 )
 
         return
