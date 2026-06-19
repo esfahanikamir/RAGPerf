@@ -23,9 +23,10 @@ def get_process_io():
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu"
+        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu"
     ):
         self.dotp_device = dotp_device
+        self.collection_abs_path = collection_abs_path
         super().__init__(
             collection_name = collection_name,
             top_k = top_k, 
@@ -79,8 +80,9 @@ class AmirsRetriever(BaseRetriever):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             # here is the storage interaction part
             t0 = time.monotonic_ns()
-            doc_colbert_vecs = client.query(
+            (doc_colbert_vecs, detailed_fetch_stat) = client.query(
                 collection_name=collection_name,
+                collection_abs_path = self.collection_abs_path,
                 filter_expr=f"doc_id in ({doc_id})",
                 output_fields=["seq_id", "vector", "filepath"],
                 limit=1000,
@@ -112,6 +114,7 @@ class AmirsRetriever(BaseRetriever):
                 ProfilingStats[doc_id] = {
                     "thread_id": threading.get_ident(),
                     "data_fetch_time_ns": data_fetch_time[doc_id],
+                    "detailed_fetch_stat": detailed_fetch_stat, # {"open_table_time": ns, "lazy_search_time_ns": ns, "db_fetch_pure_time_ns": ns, pandas_time_ns, open_table_mb_phy, open_table_mb_log, lazy_search_mb_phy, lazy_search_mb_log, db_exec_pure_mb_phy, db_fetch_pure_log, pandas_mb_phy, pandas_mb_log}
                     "numpy_time_ns": np_time[doc_id],
                     "dotp_time_ns": DotP_time[doc_id],
                     "num_patches": len(doc_colbert_vecs),

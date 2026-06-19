@@ -25,6 +25,7 @@ def main():
 
     from vectordb.milvus_api import milvus_client
     from vectordb.lancedb_api import lance_client
+    from vectordb.lancedb_api_amir import lance_client_Amir
     from vectordb.qdrant_api import qdrant_client
     from vectordb.chroma_api import chroma_client
     from vectordb.elastic_api import elastic_client
@@ -106,7 +107,7 @@ def main():
             metric_type=config["rag"]["build_index"]["metric_type"],
         )
     elif config["sys"]["vector_db"]["type"] == "lancedb":
-        db_client = lance_client(
+        db_client = lance_client_Amir(
             db_path=config["sys"]["vector_db"]["db_path"],
             collection_name=collection_name,
             # dim=config["sys"]["vector_db"]["dim"],
@@ -234,8 +235,13 @@ def main():
                 )
             elif type == "image_rerank":
                 # print(f'reranking device is {config["rag"]["reranking"]["device"]}')
+                if config["sys"]["vector_db"]["type"] == "lancedb":
+                    collection_abs_path = f"{config['sys']['vector_db']['db_path']}/{config['sys']['vector_db']['collection_name']}.lance"
+                else:
+                    collection_abs_path = None
                 retriever = AmirsRetriever(
                     collection_name=collection_name,
+                    collection_abs_path = collection_abs_path,
                     top_k=config["rag"]["retrieval"]["top_k"],
                     retrieval_batch_size=config["rag"]["retrieval"]["retrieval_batch_size"],
                     client=db_client,
