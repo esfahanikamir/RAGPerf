@@ -23,10 +23,11 @@ def get_process_io():
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu"
+        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1
     ):
         self.dotp_device = dotp_device
         self.collection_abs_path = collection_abs_path
+        self.max_rerank_worker = max_rerank_worker
         super().__init__(
             collection_name = collection_name,
             top_k = top_k, 
@@ -160,7 +161,7 @@ class AmirsRetriever(BaseRetriever):
 
 
         # with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_rerank_worker) as executor:
 
             futures = {
                 executor.submit(

@@ -27,7 +27,7 @@ class lance_client_Amir(lance_client):
 
     def query(self, collection_name, collection_abs_path, filter_expr, output_fields=None, limit=10):
         # Force hardware memory cache drop to ensure true cold-start numbers
-        print(f"DB file to be evicted from cache -> {collection_abs_path}")
+        # print(f"DB file to be evicted from cache -> {collection_abs_path}")
         evict_file_from_ram(collection_abs_path)
         proc = psutil.Process(os.getpid())
         

@@ -1,5 +1,7 @@
 def main():
+    from huggingface_hub import snapshot_download
     import os, sys
+    import pandas as pd
     import utils.python_utils as pyutils
     import time
 
@@ -171,9 +173,36 @@ def main():
                     cprint.iprintf(
                         f"*** Done Loaded dataset: {dataset_name}, total samples: {len(df)}, done"
                     )
+                elif dataset_name == "vidore":
+                    pdf_paths = os.path.join(
+                        config["bench"]["dataset_basepath"],
+                        config["bench"]["subdataset"]
+                    )
+
+                    if os.path.exists(pdf_paths):
+                        print("PDF and Queries already downloaded, skip downloading")
+                        
+                    else:
+                        print(f"Downloading {config['bench']['subdataset']} pdfs ...")
+                        local_dir=f"{config['bench']['dataset_basepath']}/{config['bench']['subdataset']}"
+                        snapshot_download(
+                            repo_id=f"vidore/{config['bench']['subdataset']}",
+                            repo_type="dataset",
+                            local_dir=local_dir,
+                            allow_patterns="pdfs/*"
+                        )
+                        pdfs = sorted([f for f in os.listdir(os.path.join(local_dir, "pdfs")) if f.endswith(".pdf")])
+                        # print(f"pdfs:{pdfs}")
+                        local_paths = [os.path.join(local_dir, "pdfs", f) for f in pdfs]
+                        print(f"local_paths: \n{local_paths}")
+                        df = pd.DataFrame({"content": local_paths})
+                        # print(f'Loaded all pdf documents for {config["bench"]["subdataset"]} ')
+                        # print(f"df:\n{df}")
                 log_time_breakdown("chunking")
                 chunker = PDFDatasetPreprocess()
                 pages = chunker.chunking_PDF_to_image(df)
+                print("png files saved")
+                return
 
             # embedding
             if config["rag"]["action"]["embedding"]:
@@ -245,7 +274,8 @@ def main():
                     top_k=config["rag"]["retrieval"]["top_k"],
                     retrieval_batch_size=config["rag"]["retrieval"]["retrieval_batch_size"],
                     client=db_client,
-                    dotp_device = config["rag"]["reranking"]["device"]
+                    dotp_device = config["rag"]["reranking"]["device"],
+                    max_rerank_worker=config["rag"]["retrieval"]["max_rerank_worker"]
                 )
             responser = ImageResponser(
                 model=config["rag"]["generation"]["model"],
