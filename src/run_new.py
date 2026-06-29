@@ -39,6 +39,9 @@ def main():
     from datasetPreprocess.PDFDatasetPreprocess import PDFDatasetPreprocess
 
     from RAGRequest.TextsRAGRequest import WikipediaRequests
+    from RAGRequest.VidoreImageRequests import VidoreImageRequest
+
+    
     from RAGPipeline.TextsRAGPipline import TextsRAGPipeline
     from RAGPipeline.ImageRAGPipline import ImagesRAGPipeline
 
@@ -257,16 +260,24 @@ def main():
                     req_type="query",
                     req_count=config["rag"]["retrieval"]["question_num"],
                 )
-                print(f"requests:\n{RAGRequest}")
-                print(f"type(requests) = {type(RAGRequest)}")
+                # print(f"requests:\n{RAGRequest}")
+                # print(f"type(requests) = {type(RAGRequest)}")
                 print(f"***End request preparation")
 
             elif config["bench"]["dataset"] == "vidore":
+                RAGRequest = VidoreImageRequest(
+                    vidore_basepath= config["bench"]["dataset_basepath"],
+                    sub_dataset_name= config["bench"]["subdataset"],
+                    run_name=config["run_name"],
+                    collection_name=collection_name,
+                    req_type="query",
+                    req_count=config["rag"]["retrieval"]["question_num"]
+                )
                 print(f"***End request preparation")
             
             else:
                 raise Exception(f"dataset {config['bench']['dataset']} not implemented yet!")
-                
+            print(f"RAGRequest = \n{RAGRequest}")
                 
         
 
