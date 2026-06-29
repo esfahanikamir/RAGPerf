@@ -173,36 +173,42 @@ def main():
                     cprint.iprintf(
                         f"*** Done Loaded dataset: {dataset_name}, total samples: {len(df)}, done"
                     )
+                    log_time_breakdown("chunking")
+                    chunker = PDFDatasetPreprocess()
+                    pages = chunker.chunking_PDF_to_image(df)
                 elif dataset_name == "vidore":
-                    pdf_paths = os.path.join(
-                        config["bench"]["dataset_basepath"],
-                        config["bench"]["subdataset"]
-                    )
-
-                    if os.path.exists(pdf_paths):
-                        print("PDF and Queries already downloaded, skip downloading")
-                        
-                    else:
-                        print(f"Downloading {config['bench']['subdataset']} pdfs ...")
-                        local_dir=f"{config['bench']['dataset_basepath']}/{config['bench']['subdataset']}"
+                    print(f"Downloading/Loading {config['bench']['subdataset']} pdfs ...")
+                    
+                    pdfs_parent_dir= os.path.join(config['bench']['dataset_basepath'], config['bench']['subdataset'])
+                    pdfs_dir = os.path.join(pdfs_parent_dir, "pdfs")
+                    if not os.path.exists(pdfs_parent_dir):
                         snapshot_download(
                             repo_id=f"vidore/{config['bench']['subdataset']}",
                             repo_type="dataset",
-                            local_dir=local_dir,
+                            local_dir=pdfs_parent_dir,
                             allow_patterns="pdfs/*"
                         )
-                        pdfs = sorted([f for f in os.listdir(os.path.join(local_dir, "pdfs")) if f.endswith(".pdf")])
-                        # print(f"pdfs:{pdfs}")
-                        local_paths = [os.path.join(local_dir, "pdfs", f) for f in pdfs]
-                        print(f"local_paths: \n{local_paths}")
-                        df = pd.DataFrame({"content": local_paths})
+                        print("PDFs downloaded")
+
+                    else:
+                        print("Pdfs were already downloaded")
+
+                    pages_dir = os.path.join(pdfs_dir, "pages")
+                    if os.path.exists(pages_dir):
+                        pages = [os.path.join(pages_dir, p) for p in os.listdir(pages_dir) if p.endswith("png")]
+                        print(f"pages were generated alreadyloaded locally")
+                    else:
+                        print(f"pdfs_dir = {pdfs_dir}")
+                        pages_files = [os.path.join(pdfs_dir, file) for file in os.listdir(pdfs_dir) if file.endswith("pdf")]
+                        print(f"pages_files: \n{pages_files}")
+                        df = pd.DataFrame({"content": pages_files})
                         # print(f'Loaded all pdf documents for {config["bench"]["subdataset"]} ')
                         # print(f"df:\n{df}")
-                log_time_breakdown("chunking")
-                chunker = PDFDatasetPreprocess()
-                pages = chunker.chunking_PDF_to_image(df)
-                print("png files saved")
-                return
+                        log_time_breakdown("chunking")
+                        chunker = PDFDatasetPreprocess()
+                        pages = chunker.chunking_PDF_to_image(df)
+                        print()
+                        print("png files saved")
 
             # embedding
             if config["rag"]["action"]["embedding"]:
@@ -244,13 +250,25 @@ def main():
                 log_time_breakdown("done")
         if config["rag"]["action"]["generation"] == True:
             # only prepare the request objecyt for now
-            RAGRequest = WikipediaRequests(
-                run_name=config["run_name"],
-                collection_name=collection_name,
-                req_type="query",
-                req_count=config["rag"]["retrieval"]["question_num"],
-            )
-            print(f"***End request preparation")
+            if config["bench"]["dataset"] == "common-pile/arxiv_papers":
+                RAGRequest = WikipediaRequests(
+                    run_name=config["run_name"],
+                    collection_name=collection_name,
+                    req_type="query",
+                    req_count=config["rag"]["retrieval"]["question_num"],
+                )
+                print(f"requests:\n{RAGRequest}")
+                print(f"type(requests) = {type(RAGRequest)}")
+                print(f"***End request preparation")
+
+            elif config["bench"]["dataset"] == "vidore":
+                print(f"***End request preparation")
+            
+            else:
+                raise Exception(f"dataset {config['bench']['dataset']} not implemented yet!")
+                
+                
+        
 
             # prepare pipeline
             if type == "image":

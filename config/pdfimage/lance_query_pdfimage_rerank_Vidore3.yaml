@@ -62,7 +62,7 @@ sys:
   log:
     metrics_log: ./log/default_run.log
   vector_db:
-    collection_name: 'lance_image_test_001' 
+    collection_name: 'vidore_v3_computer_science' 
     # db_path: /mnt/data1/yuanxu4/lancedb # local path for lance db
     db_path: /upb/users/a/amirk/scratch/UPB_phd/RAG/RAGPerf/RAGPerf_dbs/lance_pdfimage # local path for lance db
     db_token: 
