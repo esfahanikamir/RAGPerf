@@ -19,12 +19,12 @@ class VidoreImageRequest(WikipediaRequests):
             ds = load_dataset(f"vidore/{sub_dataset_name}", "queries")
             ds.save_to_disk(queries_path)
             print(f"Saved queries to {queries_path}")
-        self.question_ds = ds
-
+        self.questions = ds["test"][:req_count]["query"]
+        self.gt_answers = ds["test"][:req_count]["answer"]
         super().__init__(run_name, collection_name, req_type, req_count )
 
-    def get_questions(self, batch_size, start_idx): # stupid inputs for consistency
-        questions = self.question_ds["test"][:self.req_count]["query"]
-        gt_answers = self.question_ds["test"][:self.req_count]["answer"]
+    def get_questions(self, batch_size, start_idx): 
+        questions = self.questions[start_idx:start_idx + batch_size]
+        gt_answers = self.gt_answers[start_idx:start_idx + batch_size]
         return questions, gt_answers
         
