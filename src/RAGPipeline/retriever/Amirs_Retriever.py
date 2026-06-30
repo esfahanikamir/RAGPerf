@@ -1,3 +1,4 @@
+import itertools
 import resource
 import torch
 import threading
@@ -23,11 +24,12 @@ def get_process_io():
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1
+        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0
     ):
         self.dotp_device = dotp_device
         self.collection_abs_path = collection_abs_path
         self.max_rerank_worker = max_rerank_worker
+        self.m_of_top_k = m_of_top_k
         super().__init__(
             collection_name = collection_name,
             top_k = top_k, 
@@ -68,11 +70,14 @@ class AmirsRetriever(BaseRetriever):
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
             # search_params=search_params,
         )
-        print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")
+        # print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")
         return results
     
     def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
         # print(f"len(top_k_results) = {len(top_k_results)}")
+        
+        self.m_of_top_k = min(self.m_of_top_k, len(top_k_results))
+
         scores = []
         # with open("out.out", "w") as f:
         #     pass
@@ -159,15 +164,14 @@ class AmirsRetriever(BaseRetriever):
         # top_k_results = list(top_k_results)
         # top_k_results = top_k_results[:max_docs]
 
-
         # with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_rerank_worker) as executor:
-
             futures = {
                 executor.submit(
                     rerank_single_doc, doc_id, query_embeddings, self.client, self.collection_name, self.dotp_device
                 ): doc_id
-                for doc_id in top_k_results
+                for doc_id in itertools.islice(top_k_results, self.m_of_top_k)
+                # for doc_id in top_k_results[:self.m_of_top_k]
             }
             for future in concurrent.futures.as_completed(futures):
                 score, doc_id, filepath = future.result()

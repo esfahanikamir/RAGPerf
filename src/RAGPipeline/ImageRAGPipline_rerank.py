@@ -170,7 +170,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
                     # Rerank Added by Amir
                     if self.reranker is not None:
-                        txt = f"\tBatch:{i}, Question:{j}, Reranking top-{self.reranker.top_n} from {len(results)} candidate image pages (top_k = {self.retriever.top_k})\n"
+                        txt = f"\tBatch:{i}, Question:{j}, Reranking top-{self.reranker.top_n} from {len(results)} OR m_of_top_k = {self.retriever.m_of_top_k} candidate image pages (top_k = {self.retriever.top_k})\n"
                         batch_details += txt
                         cprint.iprintf(txt)
 
@@ -183,10 +183,12 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         # print(f"results:\n {results}")
 
 
+                        m_of_top_k = len(results)
                         results = self.retriever.pdfimage_rerank(
                             query_embeddings = query,
                             top_k_results = results,
-                            top_n = self.reranker.top_n
+                            top_n = self.reranker.top_n,
+                            
                         )
                         # results = self.reranker.rerank(questions[j], results)
                         rerank_end_time = time.monotonic_ns()
