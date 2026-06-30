@@ -76,7 +76,7 @@ class AmirsRetriever(BaseRetriever):
     def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
         # print(f"len(top_k_results) = {len(top_k_results)}")
         
-        self.m_of_top_k = min(self.m_of_top_k, len(top_k_results))
+        self.m_of_top_k = min(self.m_of_top_k, len(top_k_results)) if self.m_of_top_k != 0 else len(top_k_results)
 
         scores = []
         # with open("out.out", "w") as f:
