@@ -1,6 +1,8 @@
 bench:
   dataset: vidore
-  subdataset: vidore_v3_computer_science
+  # subdataset: vidore_v3_computer_science
+  # subdataset: vidore_v3_finance_en
+  subdataset: vidore_v3_energy
   dataset_basepath: /upb/users/a/amirk/scratch/UPB_phd/RAG
   type: image
   preprocessing:
@@ -44,7 +46,7 @@ sys:
   log:
     metrics_log: ./log/default_run.log
   vector_db:
-    collection_name: 'vidore_v3_computer_science'
+    collection_name: 'vidore_v3_energy'
     # db_path: /mnt/data1/yuanxu4/lancedb # local path for lance db
     db_path: /upb/users/a/amirk/scratch/UPB_phd/RAG/RAGPerf/RAGPerf_dbs/lance_pdfimage # local path for lance db
     db_token: 
