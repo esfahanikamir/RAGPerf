@@ -128,7 +128,9 @@ class AmirsRetriever(BaseRetriever):
                     "embedding_dim": 128,
                     "fetched_bytes":
                         len(doc_colbert_vecs) * 128 * 4,
-                    "total_rerank_time": t5 - t0
+                    "total_rerank_time": t5 - t0,
+                    "abs_start" : t0,
+                    "abs_end" : t5
                 }
                 # print(f"doc_id = {doc_id}, num_patches = {len(doc_colbert_vecs)}, data_fetch_time = {data_fetch_time[doc_id]}, dotp_time = {DotP_time[doc_id]}")        
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])

@@ -229,7 +229,9 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                                 "numpy_time_ms",
                                 "dotp_time_ms",
                                 "fetched_kb",
-                                "total_rerank_time_ms"
+                                "total_rerank_time_ms",
+                                "abs_start",
+                                "abs_end"
                             ])
                             for doc_id, stats in sorted(ProfilingStats.items()):
                                 writer.writerow([
@@ -258,7 +260,9 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                                     stats["numpy_time_ns"] / 1e6,
                                     stats["dotp_time_ns"] / 1e6,
                                     stats["fetched_bytes"] / 1024,
-                                    stats["total_rerank_time"] / 1e6
+                                    stats["total_rerank_time"] / 1e6,
+                                    stats["abs_start"],
+                                    stats["abs_end"]
                                 ])
 
                             # f.write(f"\n{'$' * 20}\n"
