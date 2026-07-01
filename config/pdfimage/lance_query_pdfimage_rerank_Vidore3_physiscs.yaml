@@ -43,6 +43,7 @@ rag:
   retrieval:
     question_num: 4
     retrieval_batch_size: 1
+    max_retrieval_threads: 1
     top_k: 10
     device: cuda:0
     max_rerank_worker: 1

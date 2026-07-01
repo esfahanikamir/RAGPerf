@@ -3,6 +3,7 @@ import resource
 import torch
 import threading
 from .BaseRetriever import *
+from vectordb.lancedb_api import Retrieval_stats
 
 
 # Global timing dictionaries
@@ -24,12 +25,13 @@ def get_process_io():
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0
+        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1
     ):
         self.dotp_device = dotp_device
         self.collection_abs_path = collection_abs_path
         self.max_rerank_worker = max_rerank_worker
         self.m_of_top_k = m_of_top_k
+        self.max_retrieval_threads = max_retrieval_threads
         super().__init__(
             collection_name = collection_name,
             top_k = top_k, 
@@ -60,7 +62,10 @@ class AmirsRetriever(BaseRetriever):
         # topk set to a reasonable large num
         # results = self.db_client.query_search(embeddings, topk=50, collection_name=self.collection_name, output_fields=["vector", "seq_id", "doc_id", "filepath"])
         # search_params = {"metric_type": "IP", "params": {}}
+
+        global Retrieval_stats
         batch_size = self.retrieval_batch_size
+        Retrieval_stats.clear()
         results = self.client.query_search_image(
             query_embeddings,
             # int(50),
@@ -68,10 +73,12 @@ class AmirsRetriever(BaseRetriever):
             search_batch_size=batch_size,
             collection_name=self.collection_name,
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
+            max_threads = self.max_retrieval_threads
             # search_params=search_params,
         )
         # print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")
-        return results
+        # print(f"check Amir_retriever -> {Retrieval_stats}")
+        return results, Retrieval_stats
     
     def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
         # print(f"len(top_k_results) = {len(top_k_results)}")

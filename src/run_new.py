@@ -305,7 +305,8 @@ def main():
                     client=db_client,
                     dotp_device = config["rag"]["reranking"]["device"],
                     max_rerank_worker=config["rag"]["retrieval"]["max_rerank_worker"],
-                    m_of_top_k=config["rag"]["retrieval"]["m_of_top_k"]
+                    m_of_top_k=config["rag"]["retrieval"]["m_of_top_k"],
+                    max_retrieval_threads = config["rag"]["retrieval"]["max_retrieval_threads"]
                 )
             responser = ImageResponser(
                 model=config["rag"]["generation"]["model"],

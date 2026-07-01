@@ -73,6 +73,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
             prompt_path = os.path.join(Logger().log_dirpath, "prompts.out")
             response_path = os.path.join(Logger().log_dirpath, "responses.out")
             questions_path = os.path.join(Logger().log_dirpath, "questions.out")
+            retrieval_time_log_path = os.path.join(Logger().log_dirpath, "retrieval_time.csv")
             
             with open(output_path, "w") as f:
                 pass
@@ -82,6 +83,14 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                 pass
             with open(questions_path, "w") as f:
                 pass
+            with open(retrieval_time_log_path, "w", newline="") as f:
+                        writer = csv.writer(f)
+                        # headers
+                        writer.writerow([
+                            "batch_num",
+                            "query",
+                            "total_time",
+                        ])
 
 
             # load models
@@ -164,9 +173,38 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     # retrieval
                     log_time_breakdown("retrieve")
                     retrieval_start_time = time.monotonic_ns()
-                    results = self.retriever.search_db_image(query)
+                    results, Retrieval_stats = self.retriever.search_db_image(query)
                     retrieval_end_time = time.monotonic_ns()
                     cprint.iprintf(f"*** Retrieval done")
+                    retrieval_stats_filename = f"Batch_{batch_num}_Query_{j}_retrieval_stats.csv"
+                    retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
+                    with open(retrieval_stats_file, "w", newline="") as f:
+                        writer = csv.writer(f)
+                        # headers
+                        writer.writerow([
+                            "batch_num",
+                            "thread_id",
+                            "abs_start_time",
+                            "abs_end_time",
+                            "thread_time",
+                        ])
+                        # print(f"Check -> {Retrieval_stats}")
+                        for batch, stats in sorted(Retrieval_stats.items()):
+                            writer.writerow([
+                                batch,
+                                stats["thread_id"],
+                                stats["abs_start_time"],
+                                stats["abs_end_time"],
+                                stats["thread_time"]
+                            ])
+                    with open(retrieval_time_log_path, "a", newline="") as f:
+                        writer = csv.writer(f)
+                        # headers
+                        writer.writerow([
+                            f"{i}",
+                            f"{j}",
+                            f"{retrieval_end_time - retrieval_start_time}",
+                        ])
 
                     # Rerank Added by Amir
                     if self.reranker is not None:

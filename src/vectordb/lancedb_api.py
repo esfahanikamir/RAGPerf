@@ -1,6 +1,8 @@
 import argparse
 import sys, os
 import random
+import threading
+import time
 from tqdm import tqdm
 import re
 import concurrent.futures
@@ -11,6 +13,8 @@ import pyarrow as pa
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.reverse()
 from vectordb.DBInstance import DBInstance
+
+Retrieval_stats = {}
 
 
 class lance_client(DBInstance):
@@ -114,7 +118,7 @@ class lance_client(DBInstance):
         topk,
         collection_name=None,
         search_batch_size=1,
-        multithread=False,
+        multithread=True,
         max_threads=4,
         consistency_level="Eventually",
         output_fields=["text", "vector"],
@@ -135,10 +139,8 @@ class lance_client(DBInstance):
 
         def search_thread(start_idx, end_idx):
             b_vectors = query_vector[start_idx:end_idx]
-
             # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
             b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()
-
             results[start_idx:end_idx] = b_results
 
         # start_time = time.time()
@@ -206,12 +208,13 @@ class lance_client(DBInstance):
         topk,
         collection_name=None,
         search_batch_size=1,
-        multithread=False,
+        multithread=True,
         max_threads=4,
         consistency_level="Eventually",
         output_fields=["text", "vector"],
     ):
         print(f"***Start query search in collection: {collection_name}")
+        # print(f"check, max_thread = {max_threads} , multithread = {multithread}")
 
         tbl = self.client.open_table(collection_name)
 
@@ -225,18 +228,36 @@ class lance_client(DBInstance):
 
         num_batches = (total_queries + search_batch_size - 1) // search_batch_size
 
-        def search_thread(start_idx, end_idx):
+        def search_thread(start_idx, end_idx, batch_num):
+            print("inside multi-thread search_thread")
             b_vectors = query_vector[start_idx:end_idx]
-
+            batch_size = end_idx - start_idx
             # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
+            t0 = time.monotonic_ns()
             b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()
+            t1 = time.monotonic_ns()
+            if len(b_results) != batch_size * topk:
+                raise ValueError(
+                    f"len(b_results) must be n*topk n = {batch_size}, topk {topk}, but got {len(b_results)}"
+                )
+            b_results = [b_results[i * topk : (i + 1) * topk] for i in range(batch_size)]
 
             results[start_idx:end_idx] = b_results
+            tid = threading.get_ident()
+            tmp_dict = {
+                "thread_id": tid,
+                "abs_start_time": t0,
+                "abs_end_time": t1,
+                "thread_time": (t1 - t0)
+            }
+            Retrieval_stats[batch_num] = tmp_dict
+            # print(f"check from lancedb_api -> {Retrieval_stats}")
 
         # start_time = time.time()
         # print(f"*** Start multithreaded search: total={self.retrieval_size}, batch_size={batch_size}, max_threads={max_threads}")
         if max_threads == 1 or not multithread:
             # Single-threaded search
+            # print("check -> inside the single thread")
             for i in tqdm(range(num_batches), desc="Searching batches"):
                 start_idx = i * search_batch_size
                 end_idx = min(start_idx + search_batch_size, total_queries)
@@ -256,6 +277,8 @@ class lance_client(DBInstance):
                 b_results = [b_results[i * topk : (i + 1) * topk] for i in range(search_batch_size)]
                 results[start_idx:end_idx] = b_results
         else:
+            # print("check -> inside the multi thread")
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
                 futures = []
                 progress = tqdm(total=num_batches, desc="Searching batches")
@@ -266,7 +289,7 @@ class lance_client(DBInstance):
                 for i in range(num_batches):
                     start_idx = i * search_batch_size
                     end_idx = min(start_idx + search_batch_size, total_queries)
-                    future = executor.submit(search_thread, start_idx, end_idx)
+                    future = executor.submit(search_thread, start_idx, end_idx, i)
                     future.add_done_callback(callback)
                     futures.append(future)
 
