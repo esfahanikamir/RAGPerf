@@ -306,9 +306,7 @@ def main():
                     dotp_device = config["rag"]["reranking"]["device"],
                     max_rerank_worker=config["rag"]["retrieval"]["max_rerank_worker"],
                     m_of_top_k=config["rag"]["retrieval"]["m_of_top_k"],
-                    max_retrieval_threads = config["rag"]["retrieval"]["max_retrieval_threads"],
-                    num_retrieval_cpu_cores = config["rag"]["retrieval"]["num_retrieval_cpu_cores"],
-                    num_rerank_cpu_cores = config["rag"]["retrieval"]["num_rerank_cpu_cores"]
+                    max_retrieval_threads = config["rag"]["retrieval"]["max_retrieval_threads"]
                 )
             responser = ImageResponser(
                 model=config["rag"]["generation"]["model"],

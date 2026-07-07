@@ -13,7 +13,6 @@ import pyarrow as pa
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.reverse()
 from vectordb.DBInstance import DBInstance
-from core_alloc.core_alloc import CoreAllocator
 
 Retrieval_stats = {}
 
@@ -211,7 +210,6 @@ class lance_client(DBInstance):
         search_batch_size=1,
         multithread=True,
         max_threads=4,
-        num_retrieval_cpu_cores = 1, 
         consistency_level="Eventually",
         output_fields=["text", "vector"],
     ):
@@ -231,7 +229,7 @@ class lance_client(DBInstance):
         num_batches = (total_queries + search_batch_size - 1) // search_batch_size
 
         def search_thread(start_idx, end_idx, batch_num):
-            # print("inside multi-thread search_thread")
+            print("inside multi-thread search_thread")
             b_vectors = query_vector[start_idx:end_idx]
             batch_size = end_idx - start_idx
             # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
@@ -280,23 +278,23 @@ class lance_client(DBInstance):
                 results[start_idx:end_idx] = b_results
         else:
             # print("check -> inside the multi thread")
-            with CoreAllocator(range(16, 16 + num_retrieval_cpu_cores)):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-                    futures = []
-                    progress = tqdm(total=num_batches, desc="Searching batches")
 
-                    def callback(future):
-                        progress.update(1)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+                futures = []
+                progress = tqdm(total=num_batches, desc="Searching batches")
 
-                    for i in range(num_batches):
-                        start_idx = i * search_batch_size
-                        end_idx = min(start_idx + search_batch_size, total_queries)
-                        future = executor.submit(search_thread, start_idx, end_idx, i)
-                        future.add_done_callback(callback)
-                        futures.append(future)
+                def callback(future):
+                    progress.update(1)
 
-                    concurrent.futures.wait(futures)
-                    progress.close()
+                for i in range(num_batches):
+                    start_idx = i * search_batch_size
+                    end_idx = min(start_idx + search_batch_size, total_queries)
+                    future = executor.submit(search_thread, start_idx, end_idx, i)
+                    future.add_done_callback(callback)
+                    futures.append(future)
+
+                concurrent.futures.wait(futures)
+                progress.close()
 
         # end_time = time.time()
         doc_ids = set()
