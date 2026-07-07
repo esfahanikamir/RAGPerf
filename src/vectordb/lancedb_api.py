@@ -229,7 +229,7 @@ class lance_client(DBInstance):
         num_batches = (total_queries + search_batch_size - 1) // search_batch_size
 
         def search_thread(start_idx, end_idx, batch_num):
-            print("inside multi-thread search_thread")
+            # print("inside multi-thread search_thread")
             b_vectors = query_vector[start_idx:end_idx]
             batch_size = end_idx - start_idx
             # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
