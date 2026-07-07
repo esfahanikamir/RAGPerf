@@ -4,6 +4,7 @@ import torch
 import threading
 from .BaseRetriever import *
 from vectordb.lancedb_api import Retrieval_stats
+from core_alloc.core_alloc import CoreAllocator
 
 
 # Global timing dictionaries
@@ -25,13 +26,15 @@ def get_process_io():
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1
+        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1, num_retrieval_cpu_cores = 1, num_rerank_cpu_cores = 1
     ):
         self.dotp_device = dotp_device
         self.collection_abs_path = collection_abs_path
         self.max_rerank_worker = max_rerank_worker
         self.m_of_top_k = m_of_top_k
         self.max_retrieval_threads = max_retrieval_threads
+        self.num_retrieval_cpu_cores = num_retrieval_cpu_cores
+        self.num_rerank_cpu_cores = num_rerank_cpu_cores
         super().__init__(
             collection_name = collection_name,
             top_k = top_k, 
@@ -73,7 +76,8 @@ class AmirsRetriever(BaseRetriever):
             search_batch_size=batch_size,
             collection_name=self.collection_name,
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
-            max_threads = self.max_retrieval_threads
+            max_threads = self.max_retrieval_threads,
+            num_retrieval_cpu_cores = self.num_retrieval_cpu_cores
             # search_params=search_params,
         )
         # print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")
@@ -173,18 +177,19 @@ class AmirsRetriever(BaseRetriever):
         # top_k_results = list(top_k_results)
         # top_k_results = top_k_results[:max_docs]
 
-        # with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_rerank_worker) as executor:
-            futures = {
-                executor.submit(
-                    rerank_single_doc, doc_id, query_embeddings, self.client, self.collection_name, self.dotp_device
-                ): doc_id
-                for doc_id in itertools.islice(top_k_results, self.m_of_top_k)
-                # for doc_id in top_k_results[:self.m_of_top_k]
-            }
-            for future in concurrent.futures.as_completed(futures):
-                score, doc_id, filepath = future.result()
-                scores.append((score, doc_id, filepath))
+        with CoreAllocator(range(16, 16 + self.num_rerank_cpu_cores)): 
+            # with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_rerank_worker) as executor:
+                futures = {
+                    executor.submit(
+                        rerank_single_doc, doc_id, query_embeddings, self.client, self.collection_name, self.dotp_device
+                    ): doc_id
+                    for doc_id in itertools.islice(top_k_results, self.m_of_top_k)
+                    # for doc_id in top_k_results[:self.m_of_top_k]
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    score, doc_id, filepath = future.result()
+                    scores.append((score, doc_id, filepath))
 
         # io_after = get_process_io()
         # usage_after = resource.getrusage(resource.RUSAGE_SELF)
