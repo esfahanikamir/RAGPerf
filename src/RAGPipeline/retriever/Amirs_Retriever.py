@@ -5,23 +5,32 @@ import threading
 from .BaseRetriever import *
 from vectordb.lancedb_api import Retrieval_stats
 
+# to return the cpu core of each thread
+import ctypes
+_libc = ctypes.CDLL("libc.so.6")
+def current_cpu() -> int:
+    return _libc.sched_getcpu()
 
 # Global timing dictionaries
 data_fetch_time = {}  # doc_id -> seconds spent fetching from DB
 np_time = {}
+np_time_start = {}
+np_time_end = {}
 DotP_time = {}     # doc_id -> seconds spent on dot product / similarity
+DotP_time_start = {}
+DotP_time_end = {}
 ProfilingStats = {} # per thread
 # per_process_io_stat = {} # per whole process
 
-def get_process_io():
-    stats = {}
+# def get_process_io():
+#     stats = {}
 
-    with open("/proc/self/io", "r") as f:
-        for line in f:
-            key, value = line.split(":")
-            stats[key.strip()] = int(value.strip())
+#     with open("/proc/self/io", "r") as f:
+#         for line in f:
+#             key, value = line.split(":")
+#             stats[key.strip()] = int(value.strip())
 
-    return stats
+#     return stats
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
@@ -92,6 +101,7 @@ class AmirsRetriever(BaseRetriever):
         def rerank_single_doc(doc_id, data, client, collection_name, dotp_device):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             # here is the storage interaction part
+            cpu_at_start = current_cpu()
             t0 = time.monotonic_ns()
             (doc_colbert_vecs, detailed_fetch_stat) = client.query(
                 collection_name=collection_name,
@@ -109,12 +119,18 @@ class AmirsRetriever(BaseRetriever):
                 doc_vecs = np.vstack(doc_colbert_vecs["vector"].to_list())
                 t3 = time.monotonic_ns()
                 np_time[doc_id] = t3 - t2
+                np_time_start[doc_id] = t2
+                np_time_end[doc_id] = t3
 
                 if dotp_device == "cpu":
                     t4 = time.monotonic_ns()
                     score = np.dot(data, doc_vecs.T).max(1).sum()
                     t5 = time.monotonic_ns()
                     DotP_time[doc_id] = t5 - t4
+                    DotP_time_start[doc_id] = t4
+                    DotP_time_end[doc_id] = t5
+
+                    cpu_at_end = current_cpu()
                 # not for now
                 # elif dotp_device.startswith("cuda"):
                 #     t1 = time.monotonic_ns()
@@ -125,11 +141,16 @@ class AmirsRetriever(BaseRetriever):
                     raise ValueError(f"Unsupported dotp_device: {dotp_device}")
 
                 ProfilingStats[doc_id] = {
-                    "thread_id": threading.get_ident(),
+                    # "thread_id": threading.get_ident(),
+                    "thread_id" : threading.get_native_id(),
                     "data_fetch_time_ns": data_fetch_time[doc_id],
                     "detailed_fetch_stat": detailed_fetch_stat, # {"open_table_time": ns, "lazy_search_time_ns": ns, "db_fetch_pure_time_ns": ns, pandas_time_ns, open_table_mb_phy, open_table_mb_log, lazy_search_mb_phy, lazy_search_mb_log, db_exec_pure_mb_phy, db_fetch_pure_log, pandas_mb_phy, pandas_mb_log}
                     "numpy_time_ns": np_time[doc_id],
+                    "numpy_time_start" : np_time_start[doc_id],
+                    "numpy_time_end" : np_time_end[doc_id],
                     "dotp_time_ns": DotP_time[doc_id],
+                    "dotp_time_start" : DotP_time_start[doc_id],
+                    "dotp_time_end" : DotP_time_end[doc_id],
                     "num_patches": len(doc_colbert_vecs),
                     "num_query_tokens": data.shape[0],
                     "embedding_dim": 128,
@@ -137,7 +158,9 @@ class AmirsRetriever(BaseRetriever):
                         len(doc_colbert_vecs) * 128 * 4,
                     "total_rerank_time": t5 - t0,
                     "abs_start" : t0,
-                    "abs_end" : t5
+                    "abs_end" : t5,
+                    "cpu_core_start" : cpu_at_start,
+                    "cpu_core_end" : cpu_at_end
                 }
                 # print(f"doc_id = {doc_id}, num_patches = {len(doc_colbert_vecs)}, data_fetch_time = {data_fetch_time[doc_id]}, dotp_time = {DotP_time[doc_id]}")        
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])

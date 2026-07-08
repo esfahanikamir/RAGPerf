@@ -1,24 +1,27 @@
 #!/bin/bash
-set -euo pipefail
-
-# Usage:
-#   ./run.sh 16
-#   ./run.sh 16-31
-#   ./run.sh 16,18,20-23
+# NOTE: designed to be SOURCED. No set -e (it would arm your login shell);
+# explicit checks with `return` instead.
 
 CORES="${1:-16}"
+CG=/sys/fs/cgroup/amir_bench
 
-# --- enroll this shell in the benchmark partition ---
-sudo sh -c "echo $$ > /sys/fs/cgroup/amir_bench/cgroup.procs"
+# --- partition must exist and be root ---
+[[ "$(cat $CG/cpuset.cpus.partition 2>/dev/null)" == "root" ]] || {
+    echo "partition missing/degraded — rerun setup"; return 1; }
 
-# --- verify, don't trust ---
+# --- enroll THIS shell, explicit PID ---
+MYPID=$$
+sudo sh -c "echo $MYPID > $CG/cgroup.procs" || {
+    echo "enrollment write failed"; return 1; }
+
+# --- verify by membership, not by inference ---
+grep -qx "$MYPID" $CG/cgroup.procs || {
+    echo "PID $MYPID not in cgroup after write"; return 1; }
 allowed=$(grep Cpus_allowed_list /proc/self/status | cut -f2)
-[[ "$allowed" == "16-31" ]] || { echo "NOT ENROLLED (mask=$allowed)"; exit 1; }
+[[ "$allowed" == "16-31" ]] || { echo "mask is $allowed, expected 16-31"; return 1; }
+echo "enrolled: shell $MYPID on $allowed"
 
-# --- one owner of parallelism: the executor ---
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 
 taskset -c "$CORES" python ./src/run_new.py \
     --config ./config/pdfimage/lance_query_pdfimage_rerank_Vidore3_physiscs.yaml \

@@ -5,16 +5,16 @@
 # each setting, and renames the output folder to physics_second_<N>T_gpuembed.
 # ──────────────────────────────────────────────────────────────────────────────
 
-set -euo pipefail
+# set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-THREAD_COUNTS=(1 2 4 8 16 32 64 128)
+THREAD_COUNTS=(1 2 4 8 16)
 
 RAGPERF_DIR="/local/amirk/RAGPerf"
 CONFIG_FILE="${RAGPERF_DIR}/config/pdfimage/lance_query_pdfimage_rerank_Vidore3_physiscs.yaml"
 MONITOR_CONFIG="${RAGPERF_DIR}/config/monitor/example_config.yaml"
 OUTPUT_DIR="${RAGPERF_DIR}/src/output"
-RUN_SCRIPT="${RAGPERF_DIR}/src/run_new.py"
+RUN_SCRIPT="${RAGPERF_DIR}/src/run.sh"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -94,9 +94,7 @@ for N in "${THREAD_COUNTS[@]}"; do
     echo "────────────────────────────────────────────────────────────────"
 
     cd "$RAGPERF_DIR"
-    time python "${RUN_SCRIPT}" \
-        --config  "${CONFIG_FILE}" \
-        --msys-config "${MONITOR_CONFIG}" \
+    time bash "${RUN_SCRIPT}" 16-31 \
         2>&1 | tee "${OUTPUT_DIR}/run_${N}T.log"
 
     RUN_EXIT=${PIPESTATUS[0]}

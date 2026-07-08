@@ -199,9 +199,27 @@ for output_run in sorted_outputs:
             data_file = os.path.join(output_folder, data_file_name)
             msg = extract_time_series(data_file, cpu_metrics_pb2.CPUMetricsTimeSeries)
 
-            from cpu_core_plots import generate_cpu_figures
+            # from cpu_core_plots import generate_cpu_figures
+            # from cpu_core_plots_res import generate_cpu_figures
+            import cpu_core_plots
+            import cpu_core_plots_res
+            import rerank_zoom_plots
 
-            generate_cpu_figures(
+            cpu_core_plots.generate_cpu_figures(
+                msg,
+                output_folder,
+                data_file_name,
+                x_pos,
+                iprintf=cprint.iprintf,
+            )
+            cpu_core_plots_res.generate_cpu_figures(
+                msg,
+                output_folder,
+                data_file_name,
+                x_pos,
+                iprintf=cprint.iprintf,
+            )
+            rerank_zoom_plots.generate_rerank_zooms(
                 msg,
                 output_folder,
                 data_file_name,

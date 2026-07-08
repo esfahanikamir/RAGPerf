@@ -76,7 +76,7 @@ def load_all_data(thread_folders):
     """
     frames = []
     for n_threads, folder in thread_folders.items():
-        csvs = sorted(f for f in os.listdir(folder) if f.endswith("_stats.csv"))
+        csvs = sorted(f for f in os.listdir(folder) if f.endswith("0_stats.csv"))
         if not csvs:
             print(f"WARNING: no CSVs found in {folder}")
             continue
