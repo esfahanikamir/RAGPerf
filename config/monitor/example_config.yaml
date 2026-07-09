@@ -1,15 +1,16 @@
 MSys:
   system:
     output_dir: ${{ pylogger.log_dirpath }}
-    default_sample_period_ms: 100
+    default_sample_period_ms: 1
   meter:
     - type: CPUMeter
       name: CPU_Monitoring
+      # sample_period_ms: 10 
     # - type: DiskMeter
       # name: Disk Monitoring
-      devices:
-        ${{ - this_process.used_disks }}
-        ${{ - vdbs.used_disks }}
+      # devices:
+      #   ${{ - this_process.used_disks }}
+      #   ${{ - vdbs.used_disks }}
     - type: MemMeter
       # name: Memory Monitoring
       probes:

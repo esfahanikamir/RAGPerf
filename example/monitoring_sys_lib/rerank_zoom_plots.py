@@ -88,84 +88,227 @@ def _core_strip(ax, t, dt, d_core, x0, x1):
     ax.set_yticks([])
 
 
-def _page_figure(g, t, dt, d, t0_ns, cores, save_path, page_tag,
-                 line_phases=("db_fetch", "dotp")):
-    x0 = (g["abs_start"].min() - t0_ns) / 1e9 - 0.01
-    x1 = (g["abs_end"].max() - t0_ns) / 1e9 + 0.01
-    used = sorted(set(g["cpu_core_start"].astype(int))
-                  | set(g["cpu_core_end"].astype(int)))
+def _document_figure(task, t, dt, d, t0_ns, cores,
+                     save_path,
+                     line_phases=("db_fetch", "dotp")):
+
+    x0 = (task["abs_start"] - t0_ns) / 1e9 - 0.01
+    x1 = (task["abs_end"]   - t0_ns) / 1e9 + 0.01
+
+    used = sorted({
+        int(task["cpu_core_start"]),
+        int(task["cpu_core_end"])
+    })
 
     fig, axes = plt.subplots(
-        1 + len(used), 1, figsize=(14, 2.0 + 1.1 * len(used)), sharex=True,
-        gridspec_kw={"height_ratios": [1.5] + [1] * len(used)})
-    axes = np.atleast_1d(axes)
-    ax_g, core_axes = axes[0], dict(zip(used, axes[1:]))
+        1 + len(used),
+        1,
+        figsize=(12, 2.2 + len(used) * 1.2),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1.4] + [1] * len(used)}
+    )
 
-    lined = [p for p in PHASES if line_phases == "all"
-             or p[0] in line_phases]
-    for _, r in g.iterrows():
-        # phase segments in the top bar (the duration encoding)
-        for label, s_col, d_col, color in PHASES:
-            ax_g.barh(0, r[d_col] / 1e3, left=(r[s_col] - t0_ns) / 1e9,
-                      height=0.7, color=color, linewidth=0)
-        ts_ = (r["abs_start"] - t0_ns) / 1e9
-        mig = int(r["cpu_core_start"]) != int(r["cpu_core_end"])
-        if mig:
-            ax_g.barh(0, (r["abs_end"] - r["abs_start"]) / 1e9, left=ts_,
-                      height=0.7, fill=False, edgecolor="red", linewidth=0.9)
-        ax_g.text(ts_, 0.45, f"d{int(r['doc_id'])}@c{int(r['cpu_core_start'])}",
-                  fontsize=5, rotation=90, va="bottom")
-        # boundary lines (the localization encoding): task start solid grey;
-        # only the phases in `line_phases` get dashed lines — sub-ms phases
-        # are already visible as bar segments and their lines only smear
-        for a in axes:
-            a.axvline(ts_, color="dimgray", linewidth=0.7, alpha=0.8)
-            for label, s_col, _, color in lined:
-                a.axvline((r[s_col] - t0_ns) / 1e9, color=color,
-                          linestyle="--", linewidth=0.7, alpha=0.85)
-    ax_g.set_ylim(-0.6, 1.3)
-    ax_g.set_yticks([])
-    ax_g.set_ylabel("tasks", rotation=0, ha="right", va="center", fontsize=8)
+    axes = np.atleast_1d(axes)
+
+    ax_task = axes[0]
+    core_axes = dict(zip(used, axes[1:]))
+
+    lined = [
+        p for p in PHASES
+        if line_phases == "all" or p[0] in line_phases
+    ]
+
+    #
+    # ----- task bar -----
+    #
+
+    for label, s_col, d_col, color in PHASES:
+
+        ax_task.barh(
+            0,
+            task[d_col] / 1e3,
+            left=(task[s_col] - t0_ns) / 1e9,
+            height=0.7,
+            color=color,
+            linewidth=0
+        )
+
+    task_start = (task["abs_start"] - t0_ns) / 1e9
+
+    migrated = (
+        int(task["cpu_core_start"])
+        !=
+        int(task["cpu_core_end"])
+    )
+
+    if migrated:
+
+        ax_task.barh(
+            0,
+            (task["abs_end"] - task["abs_start"]) / 1e9,
+            left=task_start,
+            height=0.7,
+            fill=False,
+            edgecolor="red",
+            linewidth=1
+        )
+
+    ax_task.text(
+        task_start,
+        0.45,
+        f"d{int(task['doc_id'])}@c{int(task['cpu_core_start'])}",
+        fontsize=8,
+        rotation=90,
+        va="bottom"
+    )
+
+    #
+    # phase boundaries
+    #
+
+    for ax in axes:
+
+        ax.axvline(
+            task_start,
+            color="dimgray",
+            linewidth=0.8
+        )
+
+        for label, s_col, _, color in lined:
+
+            ax.axvline(
+                (task[s_col] - t0_ns) / 1e9,
+                color=color,
+                linestyle="--",
+                linewidth=0.8,
+                alpha=0.85
+            )
+
+    ax_task.set_ylim(-0.6, 1.2)
+    ax_task.set_yticks([])
+    ax_task.set_ylabel("rerank",
+                       rotation=0,
+                       ha="right",
+                       va="center")
+
+    #
+    # ----- CPU -----
+    #
 
     for core in used:
-        _core_strip(core_axes[core], t, dt, d[:, cores.index(core), :],
-                    x0, x1)
-        core_axes[core].set_ylabel(f"cpu{core}", rotation=0, ha="right",
-                                   va="center", fontsize=8)
+
+        _core_strip(
+            core_axes[core],
+            t,
+            dt,
+            d[:, cores.index(core), :],
+            x0,
+            x1
+        )
+
+        core_axes[core].set_ylabel(
+            f"cpu{core}",
+            rotation=0,
+            ha="right",
+            va="center"
+        )
 
     axes[-1].set_xlim(x0, x1)
-    axes[-1].set_xlabel("Time (s, from CPUMeter recording start)")
+    axes[-1].set_xlabel("Time (s)")
 
-    # legend row 1: bar fills (phase durations); row 2: boundary lines;
-    # row 3: CPU fields — three encodings, separately labeled
-    bar_h = [plt.Rectangle((0, 0), 1, 1, fc=c) for *_, c in PHASES]
-    ln_h = [plt.Line2D([0], [0], color=c, linestyle="--", linewidth=1.2)
-            for *_, c in lined]
-    ln_h.append(plt.Line2D([0], [0], color="dimgray", linewidth=1.2))
-    fl_h = [plt.Rectangle((0, 0), 1, 1, fc=FIELD_COLORS[f],
-                          ec="lightgray" if f == "idle" else "none")
-            for f in STACK_ORDER]
-    leg1 = fig.legend(bar_h, [f"{p[0]} (bar)" for p in PHASES],
-                      loc="upper center", ncol=len(PHASES), fontsize=6,
-                      bbox_to_anchor=(0.5, 1.10), frameon=False)
-    leg2 = fig.legend(ln_h, [f"{p[0]} start" for p in lined]
-                      + ["task start"],
-                      loc="upper center", ncol=len(lined) + 1, fontsize=6,
-                      bbox_to_anchor=(0.5, 1.05), frameon=False)
-    fig.legend(fl_h, STACK_ORDER, loc="upper center",
-               ncol=len(STACK_ORDER), fontsize=6,
-               bbox_to_anchor=(0.5, 1.00), frameon=False)
+    #
+    # legend
+    #
+
+    #
+# ----- legends -----
+#
+
+    # Row 1: phase-duration bars
+    bar_h = [
+        plt.Rectangle((0, 0), 1, 1, fc=c)
+        for *_, c in PHASES
+    ]
+
+    # Row 2: phase boundary lines
+    ln_h = [
+        plt.Line2D([0], [0],
+                color=c,
+                linestyle="--",
+                linewidth=1.2)
+        for *_, c in lined
+    ]
+
+    ln_h.append(
+        plt.Line2D([0], [0],
+                color="dimgray",
+                linewidth=1.2)
+    )
+
+    # Row 3: CPU activity fields
+    fl_h = [
+        plt.Rectangle(
+            (0, 0),
+            1,
+            1,
+            fc=FIELD_COLORS[f],
+            ec="lightgray" if f == "idle" else "none"
+        )
+        for f in STACK_ORDER
+    ]
+
+    leg1 = fig.legend(
+        bar_h,
+        [f"{p[0]} (bar)" for p in PHASES],
+        loc="upper center",
+        ncol=len(PHASES),
+        fontsize=6,
+        bbox_to_anchor=(0.5, 1.10),
+        frameon=False,
+    )
+
+    leg2 = fig.legend(
+        ln_h,
+        [f"{p[0]} start" for p in lined] + ["task start"],
+        loc="upper center",
+        ncol=len(lined) + 1,
+        fontsize=6,
+        bbox_to_anchor=(0.5, 1.05),
+        frameon=False,
+    )
+
+    leg3 = fig.legend(
+        fl_h,
+        STACK_ORDER,
+        loc="upper center",
+        ncol=len(STACK_ORDER),
+        fontsize=6,
+        bbox_to_anchor=(0.5, 1.00),
+        frameon=False,
+    )
+
     fig.add_artist(leg1)
     fig.add_artist(leg2)
+    fig.add_artist(leg3)
 
-    tid = int(g["thread_id"].iloc[0])
-    b, q = int(g["batch_num"].iloc[0]), int(g["query_id"].iloc[0])
-    fig.suptitle(f"B{b}Q{q} tid {tid} — rerank sub-phase zoom {page_tag} "
-                 f"({len(g)} tasks, {(x1-x0)*1e3:.0f} ms)",
-                 fontsize=9, y=1.15)
+    tid = int(task["thread_id"])
+    b = int(task["batch_num"])
+    q = int(task["query_id"])
+    doc = int(task["doc_id"])
+
+    fig.suptitle(
+        f"B{b}Q{q} tid {tid} — document {doc}",
+        fontsize=9,
+        y=1.15,
+    )
+    fig.suptitle(
+        f"B{b}Q{q} tid {tid} — document {doc}",
+        fontsize=9,
+        y=1.15,
+    )
+
     fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
-
 
 def generate_rerank_zooms(msg, output_folder, data_file_name, x_pos,
                           tasks_per_fig=8, iprintf=print, max_figures=None,
@@ -207,19 +350,37 @@ def _generate_rerank_zooms_from_arrays(output_folder, t, dt, d, t0_ns,
     out_dir = os.path.join(output_folder, "rerank_zoom")
     os.makedirs(out_dir, exist_ok=True)
     n = 0
-    for (b, q, tid), g in df.groupby(["batch_num", "query_id",
-                                      "thread_id"]):
+    for (b, q, tid), g in df.groupby(
+        ["batch_num", "query_id", "thread_id"]):
+
         g = g.sort_values("abs_start").reset_index(drop=True)
-        for p0 in range(0, len(g), tasks_per_fig):
+
+        for idx, (_, task) in enumerate(g.iterrows()):
+
             if max_figures is not None and n >= max_figures:
-                iprintf(f"[rerank-zoom] stopped at max_figures={max_figures}")
+
+                iprintf(
+                    f"[rerank-zoom] stopped at max_figures={max_figures}"
+                )
                 return n
-            page = g.iloc[p0:p0 + tasks_per_fig]
-            tag = f"p{p0 // tasks_per_fig:02d}"
-            _page_figure(page, t, dt, d, t0_ns, cores,
-                         os.path.join(out_dir,
-                                      f"B{b}_Q{q}_tid{tid}_{tag}.{IMG_EXT}"),
-                         tag, line_phases=line_phases)
+
+            save_name = (
+                f"B{b}_Q{q}_tid{tid}"
+                f"_doc{int(task['doc_id'])}"
+                f"_{idx:03d}.{IMG_EXT}"
+            )
+
+            _document_figure(
+                task,
+                t,
+                dt,
+                d,
+                t0_ns,
+                cores,
+                os.path.join(out_dir, save_name),
+                line_phases=line_phases
+            )
+
             n += 1
     iprintf(f"[rerank-zoom] saved {n} zoom page(s) in {out_dir}/")
     return n

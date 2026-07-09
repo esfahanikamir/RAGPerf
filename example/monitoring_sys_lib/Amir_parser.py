@@ -24,6 +24,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 
+from google.protobuf import text_format
+
 search_dir = os.path.join(os.path.dirname(__file__), "output")
 search_dir = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir, "src", "output")
@@ -199,6 +201,9 @@ for output_run in sorted_outputs:
             data_file = os.path.join(output_folder, data_file_name)
             msg = extract_time_series(data_file, cpu_metrics_pb2.CPUMetricsTimeSeries)
 
+            # with open("msg.txt", "w") as f:
+            #     f.write(text_format.MessageToString(msg))
+            # exit()
             # from cpu_core_plots import generate_cpu_figures
             # from cpu_core_plots_res import generate_cpu_figures
             import cpu_core_plots
