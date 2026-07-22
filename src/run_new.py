@@ -251,6 +251,16 @@ def main():
                     f"***Insertion done, total {len(dict_list)} embeddings inserted, time : {time.monotonic_ns()}"
                 )
                 log_time_breakdown("done")
+            if config['rag']['action']['build_index']:
+                    log_time_breakdown("build")
+                    db_client.build_index(
+                        collection_name=collection_name,
+                        index_type=config["rag"]["build_index"]["index_type"],
+                        metric_type=config["rag"]["build_index"]["metric_type"],
+                        # device=None,
+                        # device=device
+                    )
+                    print(f"***Indexing done for collection: {collection_name}")
         if config["rag"]["action"]["generation"] == True:
             # only prepare the request objecyt for now
             if config["bench"]["dataset"] == "common-pile/arxiv_papers":
