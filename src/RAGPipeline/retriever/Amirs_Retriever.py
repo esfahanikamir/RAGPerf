@@ -34,8 +34,9 @@ ProfilingStats = {} # per thread
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, collection_abs_path, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1
+        self, collection_name, collection_abs_path, nprobe, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1
     ):
+        self.nprobe = nprobe
         self.dotp_device = dotp_device
         self.collection_abs_path = collection_abs_path
         self.max_rerank_worker = max_rerank_worker
@@ -82,7 +83,8 @@ class AmirsRetriever(BaseRetriever):
             search_batch_size=batch_size,
             collection_name=self.collection_name,
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
-            max_threads = self.max_retrieval_threads
+            max_threads = self.max_retrieval_threads,
+            nprobe = self.nprobe
             # search_params=search_params,
         )
         # print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")

@@ -3,6 +3,7 @@ import os
 import psutil
 import sys
 import time
+from tqdm import tqdm
 from .lancedb_api import lance_client
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -103,5 +104,114 @@ class lance_client_Amir(lance_client):
         # calculate_diffs(after_db_exec, after_pandas, "pandas", db_fetch_stats)
 
         return (query_df, db_fetch_stats)
+
+
+    def query_search_image(
+            self,
+            query_vector,
+            nprobe,
+            topk,
+            collection_name=None,
+            search_batch_size=1,
+            multithread=True,
+            max_threads=4,
+            consistency_level="Eventually",
+            output_fields=["text", "vector"],
+        ):
+            print(f"***Start query search in collection: {collection_name}")
+            # print(f"check, max_thread = {max_threads} , multithread = {multithread}")
+    
+            tbl = self.client.open_table(collection_name)
+    
+            total_queries = len(query_vector)
+    
+            # Adjust search_batch_size if it exceeds total_queries
+            if search_batch_size > total_queries:
+                search_batch_size = total_queries
+    
+            results = [None] * total_queries
+    
+            num_batches = (total_queries + search_batch_size - 1) // search_batch_size
+    
+            def search_thread(start_idx, end_idx, batch_num):
+                # print("inside multi-thread search_thread")
+                b_vectors = query_vector[start_idx:end_idx]
+                batch_size = end_idx - start_idx
+                # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
+                t0 = time.monotonic_ns()
+                b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                t1 = time.monotonic_ns()
+                if len(b_results) != batch_size * topk:
+                    raise ValueError(
+                        f"len(b_results) must be n*topk n = {batch_size}, topk {topk}, but got {len(b_results)}"
+                    )
+                b_results = [b_results[i * topk : (i + 1) * topk] for i in range(batch_size)]
+    
+                results[start_idx:end_idx] = b_results
+                tid = threading.get_ident()
+                tmp_dict = {
+                    "thread_id": tid,
+                    "abs_start_time": t0,
+                    "abs_end_time": t1,
+                    "thread_time": (t1 - t0)
+                }
+                Retrieval_stats[batch_num] = tmp_dict
+                # print(f"check from lancedb_api -> {Retrieval_stats}")
+    
+            # start_time = time.time()
+            # print(f"*** Start multithreaded search: total={self.retrieval_size}, batch_size={batch_size}, max_threads={max_threads}")
+            if max_threads == 1 or not multithread:
+                # Single-threaded search
+                # print("check -> inside the single thread")
+                for i in tqdm(range(num_batches), desc="Searching batches"):
+                    start_idx = i * search_batch_size
+                    end_idx = min(start_idx + search_batch_size, total_queries)
+                    b_vectors = query_vector[start_idx:end_idx]
+                    b_results = (
+                        tbl.search(b_vectors, vector_column_name='vector')
+                        .limit(topk)
+                        .nprobes(nprobe)
+                        .to_list()
+                    )
+                    # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()
+                    # here it shows that the retriever searches for top_k mathces for each query token
+                    if len(b_results) != len(b_vectors) * topk:
+                        raise ValueError(
+                            f"len(b_results) must be n*topk n = {search_batch_size}, topk {topk}, but got {len(b_results)}"
+                        )
+                    b_results = [b_results[i * topk : (i + 1) * topk] for i in range(search_batch_size)]
+                    results[start_idx:end_idx] = b_results
+            else:
+                # print("check -> inside the multi thread")
+    
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+                    futures = []
+                    progress = tqdm(total=num_batches, desc="Searching batches")
+    
+                    def callback(future):
+                        progress.update(1)
+    
+                    for i in range(num_batches):
+                        start_idx = i * search_batch_size
+                        end_idx = min(start_idx + search_batch_size, total_queries)
+                        future = executor.submit(search_thread, start_idx, end_idx, i)
+                        future.add_done_callback(callback)
+                        futures.append(future)
+    
+                    concurrent.futures.wait(futures)
+                    progress.close()
+    
+            # end_time = time.time()
+            doc_ids = set()
+            # here it shows that a union of all the top_k matches of all the tokens will be returned as the result
+            with open("query.out", "w") as fout:
+                for query_results in results:
+                    for result in query_results:
+                        doc_ids.add(result["doc_id"])
+    
+            print(f"***Query search completed.")
+            # The outputs are the doc_ids only -> nothing more implemented although 
+            # there is too much in the function parameters
+            return doc_ids
 
  

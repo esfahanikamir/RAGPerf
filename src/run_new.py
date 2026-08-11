@@ -310,6 +310,7 @@ def main():
                 retriever = AmirsRetriever(
                     collection_name=collection_name,
                     collection_abs_path = collection_abs_path,
+                    nprobe = config["rag"]["retrieval"]["nprobe"],
                     top_k=config["rag"]["retrieval"]["top_k"],
                     retrieval_batch_size=config["rag"]["retrieval"]["retrieval_batch_size"],
                     client=db_client,

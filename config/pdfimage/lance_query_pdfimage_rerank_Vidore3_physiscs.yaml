@@ -22,7 +22,7 @@ rag:
     evaluate: false
   build_index:
     index_type: IVF_HNSW_SQ
-    metric_type: L2
+    metric_type: cosine
   embedding:
     device: cuda:0 
     # device: cpu 
@@ -44,6 +44,7 @@ rag:
     question_num: 4
     retrieval_batch_size: 1
     max_retrieval_threads: 1
+    nprobe: 20
     top_k: 10
     device: cuda:0
     max_rerank_worker: 1
@@ -66,7 +67,7 @@ sys:
   log:
     metrics_log: ./log/default_run.log
   vector_db:
-    collection_name: 'vidore_v3_physics' 
+    collection_name: 'vidore_v3_physics_2' 
     # db_path: /mnt/data1/yuanxu4/lancedb # local path for lance db
     db_path: /upb/users/a/amirk/scratch/UPB_phd/RAG/RAGPerf/RAGPerf_dbs/lance_pdfimage # local path for lance db
     db_token: 
