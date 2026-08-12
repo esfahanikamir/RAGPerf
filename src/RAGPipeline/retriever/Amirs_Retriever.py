@@ -3,7 +3,8 @@ import resource
 import torch
 import threading
 from .BaseRetriever import *
-from vectordb.lancedb_api import Retrieval_stats
+# from vectordb.lancedb_api import Retrieval_stats
+from vectordb.lancedb_api_amir import Retrieval_stats
 
 # to return the cpu core of each thread
 import ctypes

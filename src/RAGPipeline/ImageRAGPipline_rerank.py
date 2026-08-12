@@ -180,23 +180,31 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
                     with open(retrieval_stats_file, "w", newline="") as f:
                         writer = csv.writer(f)
-                        # headers
+
                         writer.writerow([
                             "batch_num",
                             "thread_id",
                             "abs_start_time",
                             "abs_end_time",
                             "thread_time",
+                            "token",
+                            "doc_id",
+                            "patch_id",
                         ])
-                        # print(f"Check -> {Retrieval_stats}")
+
                         for batch, stats in sorted(Retrieval_stats.items()):
-                            writer.writerow([
-                                batch,
-                                stats["thread_id"],
-                                stats["abs_start_time"],
-                                stats["abs_end_time"],
-                                stats["thread_time"]
-                            ])
+                            for token, patches in stats["patches_per_token"].items():
+                                for patch in patches:
+                                    writer.writerow([
+                                        batch,
+                                        stats["thread_id"],
+                                        stats["abs_start_time"],
+                                        stats["abs_end_time"],
+                                        stats["thread_time"],
+                                        token,
+                                        patch["doc_id"],
+                                        patch["patch_id"],
+                                    ])
                     with open(retrieval_time_log_path, "a", newline="") as f:
                         writer = csv.writer(f)
                         # headers
