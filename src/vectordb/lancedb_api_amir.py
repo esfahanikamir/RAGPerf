@@ -27,6 +27,7 @@ class lance_client_Amir(lance_client):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.type = "lancedb"
+        self.thread_local_storage = threading.local()
 
 
     def query(self, collection_name, collection_abs_path, filter_expr, output_fields=None, limit=10):
@@ -120,7 +121,7 @@ class lance_client_Amir(lance_client):
 
         return (query_df, db_fetch_stats)
 
-
+    
     def query_search_image(
             self,
             query_vector,
@@ -147,9 +148,16 @@ class lance_client_Amir(lance_client):
             results = [None] * total_queries
     
             num_batches = (total_queries + search_batch_size - 1) // search_batch_size
+
+            def init_worker():
+                self.thread_local_storage.tbl = self.client.open_table(collection_name)
     
             def search_thread(start_idx, end_idx, batch_num):
                 # print("inside multi-thread search_thread")
+                tid = threading.get_ident()
+                tbl = self.thread_local_storage.tbl
+                patches_per_token = {}
+
                 b_vectors = query_vector[start_idx:end_idx]
                 batch_size = end_idx - start_idx
                 # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
@@ -161,9 +169,22 @@ class lance_client_Amir(lance_client):
                         f"len(b_results) must be n*topk n = {batch_size}, topk {topk}, but got {len(b_results)}"
                     )
                 b_results = [b_results[i * topk : (i + 1) * topk] for i in range(batch_size)]
+
+                ###
+                # TEST
+                plan = (
+                    tbl.search(b_vectors, vector_column_name='vector')
+                    .limit(topk)
+                    .nprobes(nprobe)
+                    .analyze_plan()
+                )
+                print(f"{'*' * 50} Retrieval for thread = {tid} {'*' * 50}")
+                print(plan)
+                print(f"{'*' * 50}")
+                ###
     
                 results[start_idx:end_idx] = b_results
-                tid = threading.get_ident()
+                
                 tmp_dict = {
                     "thread_id": tid,
                     "abs_start_time": t0,
@@ -240,7 +261,7 @@ class lance_client_Amir(lance_client):
             else:
                 # print("check -> inside the multi thread")
     
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads, initializer=init_worker,) as executor:
                     futures = []
                     progress = tqdm(total=num_batches, desc="Searching batches")
     
