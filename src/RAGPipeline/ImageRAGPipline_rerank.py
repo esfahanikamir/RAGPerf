@@ -63,7 +63,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
     def process(self, request, batch_size=2, dont_answer= False) -> None:
         global data_fetch_time, DotP_time, ProfilingStats
-        global per_process_io_stat  
+        # global per_process_io_stat  
         # ToDo: evict cache to get the page faults      
         if request.req_type == "query":
             cprint.iprintf(
@@ -159,8 +159,8 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                 vectors = self.embedder.embedding_query(questions)
                 embedding_end_time = time.monotonic_ns()
                 print(f"len(vectors) = {len(vectors)}")
-                for i, vector in enumerate(vectors):
-                    print(f"vector {i}/total {len(vectors) - 1}\ntype {type(vector)}\nlen(this vector = {len(vector)})")
+                for vi, vector in enumerate(vectors):
+                    print(f"vector {vi}/total {len(vectors) - 1}\ntype {type(vector)}\nlen(this vector = {len(vector)})")
                 # self.embedder.free_encoder()
                 cprint.iprintf(f"*** Embedding done")
 
@@ -178,33 +178,45 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     cprint.iprintf(f"*** Retrieval done")
                     retrieval_stats_filename = f"Batch_{batch_num}_Query_{j}_retrieval_stats.csv"
                     retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
+
+                    fieldnames = [
+                        "global_req#", "is_in_query_batch#", "token_id",
+                        "in_token_batch#", "by_thread#", "plan",
+                        "doc_id", "patch_id"
+                    ]
+
                     with open(retrieval_stats_file, "w", newline="") as f:
-                        writer = csv.writer(f)
+                        writer = csv.DictWriter(f, fieldnames=fieldnames)
+                        writer.writeheader()
+                        for token_batch, stats in sorted(Retrieval_stats.items()):
+                            first = True
+                            for patch in stats["patches_per_token"]:
+                                if first:
+                                    writer.writerow({
+                                        "global_req#": i,                    # now correctly the outer batch-start index
+                                        "is_in_query_batch#": j,
+                                        "token_id": patch["token_id"],        # fixed: was stats["token_id"]
+                                        "in_token_batch#": stats["token_batch_id"],
+                                        "by_thread#": stats["thread_id"],
+                                        "plan": stats["plan"],
+                                        "doc_id": patch["doc_id"],
+                                        "patch_id": patch["patch_id"],
+                                    })
+                                    first = False
+                                else:
+                                    writer.writerow({
+                                        "global_req#": "_",                    # now correctly the outer batch-start index
+                                        "is_in_query_batch#": "_",
+                                        "token_id": "_",        # fixed: was stats["token_id"]
+                                        "in_token_batch#": "_",
+                                        "by_thread#": "_",
+                                        "plan": "_",
+                                        "doc_id": patch["doc_id"],
+                                        "patch_id": patch["patch_id"],
+                                    })
 
-                        writer.writerow([
-                            "batch_num",
-                            "thread_id",
-                            "abs_start_time",
-                            "abs_end_time",
-                            "thread_time",
-                            "token",
-                            "doc_id",
-                            "patch_id",
-                        ])
 
-                        for batch, stats in sorted(Retrieval_stats.items()):
-                            for token, patches in stats["patches_per_token"].items():
-                                for patch in patches:
-                                    writer.writerow([
-                                        batch,
-                                        stats["thread_id"],
-                                        stats["abs_start_time"],
-                                        stats["abs_end_time"],
-                                        stats["thread_time"],
-                                        token,
-                                        patch["doc_id"],
-                                        patch["patch_id"],
-                                    ])
+        # retrieval_start_time/end_time block and retrieval_time_log_path write removed entirely
                     with open(retrieval_time_log_path, "a", newline="") as f:
                         writer = csv.writer(f)
                         # headers

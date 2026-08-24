@@ -114,9 +114,9 @@ class lance_client_Amir(lance_client):
         else:
             plan = tbl.search().where(filter_expr).limit(limit).analyze_plan()
 
-        print(f"{'#' * 50} RERANKING {'#' * 50}")
-        print(plan)
-        print(f"{'#' * 50} {'#' * 50}")
+        # print(f"{'#' * 50} RERANKING {'#' * 50}")
+        # print(plan)
+        # print(f"{'#' * 50} {'#' * 50}")
         ##
 
         return (query_df, db_fetch_stats)
@@ -124,7 +124,7 @@ class lance_client_Amir(lance_client):
     
     def query_search_image(
             self,
-            query_vector,
+            query_vector, # token embeddings of a single question(query)
             nprobe,
             topk,
             collection_name=None,
@@ -138,7 +138,7 @@ class lance_client_Amir(lance_client):
             # print(f"check, max_thread = {max_threads} , multithread = {multithread}")
     
             tbl = self.client.open_table(collection_name)
-    
+            # number of a single query tokens
             total_queries = len(query_vector)
     
             # Adjust search_batch_size if it exceeds total_queries
@@ -156,45 +156,43 @@ class lance_client_Amir(lance_client):
                 # print("inside multi-thread search_thread")
                 tid = threading.get_ident()
                 tbl = self.thread_local_storage.tbl
-                patches_per_token = {}
+                patches_per_token = []  # unified flat structure, same as single-threaded branch
 
                 b_vectors = query_vector[start_idx:end_idx]
-                batch_size = end_idx - start_idx
+                # batch_size = end_idx - start_idx
+                actual_batch_size = end_idx - start_idx
                 # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
-                t0 = time.monotonic_ns()
-                b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
-                t1 = time.monotonic_ns()
-                if len(b_results) != batch_size * topk:
-                    raise ValueError(
-                        f"len(b_results) must be n*topk n = {batch_size}, topk {topk}, but got {len(b_results)}"
-                    )
-                b_results = [b_results[i * topk : (i + 1) * topk] for i in range(batch_size)]
 
-                ###
-                # TEST
-                plan = (
-                    tbl.search(b_vectors, vector_column_name='vector')
-                    .limit(topk)
-                    .nprobes(nprobe)
-                    .analyze_plan()
-                )
-                print(f"{'*' * 50} Retrieval for thread = {tid} {'*' * 50}")
-                print(plan)
-                print(f"{'*' * 50}")
-                ###
+                plan = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).analyze_plan()
+                # print(f"{'*' * 50} Retrieval for thread = {tid} {'*' * 50}")
+                # print(plan)
+                # print(f"{'*' * 50}")
+
+                # t0 = time.monotonic_ns()
+                b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                # t_setup = time.monotonic_ns()
+                # arrow_result = lazy_plan.to_arrow()
+                # t_exec = time.monotonic_ns()
+                # b_results = arrow_result.to_pylist()
+                # t_convert = time.monotonic_ns()
+                if len(b_results) != actual_batch_size * topk:
+                    raise ValueError(
+                        f"len(b_results) must be n*topk n = {actual_batch_size}, topk {topk}, but got {len(b_results)}"
+                    )
+                b_results = [b_results[i * topk : (i + 1) * topk] for i in range(actual_batch_size)]
     
                 results[start_idx:end_idx] = b_results
                 
                 tmp_dict = {
                     "thread_id": tid,
-                    "abs_start_time": t0,
-                    "abs_end_time": t1,
-                    "thread_time": (t1 - t0)
+                    "token_batch_id": batch_num,
+                "plan": plan
                 }
                 for j, query_results in enumerate(b_results):
-                    patches_per_token[f'token_{j}'] = []
+                    token_id = start_idx + j  # global token index, not local j
                     for result in query_results:
-                        patches_per_token[f'token_{j}'].append({
+                        patches_per_token.append({
+                            'token_id': token_id,
                             'doc_id': result['doc_id'],
                             'patch_id': result['seq_id']
                         })
@@ -211,53 +209,56 @@ class lance_client_Amir(lance_client):
                     start_idx = i * search_batch_size
                     end_idx = min(start_idx + search_batch_size, total_queries)
                     b_vectors = query_vector[start_idx:end_idx]
-                    t0 = time.monotonic_ns()
-                    b_results = (
-                        tbl.search(b_vectors, vector_column_name='vector')
-                        .limit(topk)
-                        .nprobes(nprobe)
-                        .to_list()
-                    )
-                    t1 = time.monotonic_ns()
+                    actual_batch_size = end_idx - start_idx
                     ###
-                    # TEST
                     plan = (
                         tbl.search(b_vectors, vector_column_name='vector')
                         .limit(topk)
                         .nprobes(nprobe)
                         .analyze_plan()
                     )
-                    print(f"{'*' * 50}")
-                    print(plan)
-                    print(f"{'*' * 50}")
-                    ###
+                    # print(f"{'*' * 50}")
+                    # print(plan)
+                    # print(f"{'*' * 50}")
+
+                    # t0 = time.monotonic_ns()
+                    b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                    # t_setup = time.monotonic_ns()
+                    # arrow_result = lazy_plan.to_arrow()
+                    # t_exec = time.monotonic_ns()
+                    # b_results = arrow_result.to_pylist()
+                    # t_convert = time.monotonic_ns()
+                    
                     # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()
                     # here it shows that the retriever searches for top_k mathces for each query token
-                    if len(b_results) != len(b_vectors) * topk:
+                    if len(b_results) != actual_batch_size * topk:
                         raise ValueError(
-                            f"len(b_results) must be n*topk n = {search_batch_size}, topk {topk}, but got {len(b_results)}"
+                            f"len(b_results) must be n*topk n = {actual_batch_size}, topk {topk}, but got {len(b_results)}"
                         )
-                    b_results = [b_results[i * topk : (i + 1) * topk] for i in range(search_batch_size)]
+                    b_results = [b_results[i * topk : (i + 1) * topk] for i in range(actual_batch_size)]
                     results[start_idx:end_idx] = b_results
                     tid = threading.get_ident()
                     tmp_dict = {
                         "thread_id": tid,
-                        "abs_start_time": t0,
-                        "abs_end_time": t1,
-                        "thread_time": (t1 - t0)
+                        "token_batch_id": i, 
+                        "plan": plan,
                     }
-                    patches_per_token = {}
+                    patches_per_token = []
                     # The union of all top-k matches across all tokens will be returned as the result
                     for j, query_results in enumerate(b_results):
-                        patches_per_token[f'token_{j}'] = []
+                        token_id = start_idx + j
                         for result in query_results:
-                            patches_per_token[f'token_{j}'].append({
+                            patches_per_token.append({
+                                'token_id' : token_id,
                                 'doc_id': result['doc_id'],
                                 'patch_id': result['seq_id']
                             })
                     tmp_dict["patches_per_token"] = patches_per_token
                     Retrieval_stats[i] = tmp_dict
-                    
+                ##
+                # print("##Retrieval_stats under lancedb_api_amir.py##")
+                # print(Retrieval_stats)
+
             else:
                 # print("check -> inside the multi thread")
     

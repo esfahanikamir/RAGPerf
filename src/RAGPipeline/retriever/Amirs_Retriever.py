@@ -85,7 +85,7 @@ class AmirsRetriever(BaseRetriever):
             collection_name=self.collection_name,
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
             max_threads = self.max_retrieval_threads,
-            nprobe = self.nprobe
+            nprobe = self.nprobe,
             # search_params=search_params,
         )
         # print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")
