@@ -21,6 +21,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.reverse()
 
 Retrieval_stats = {}
+thread_timing_retrieval = {}  # keyed by thread_id
+thread_timing_lock_retr = threading.Lock()
 
 
 class lance_client_Amir(lance_client):
@@ -133,11 +135,11 @@ class lance_client_Amir(lance_client):
             max_threads=4,
             consistency_level="Eventually",
             output_fields=["text", "vector"],
+            ignore_analyzes = False,
         ):
             print(f"***Start query search in collection: {collection_name}")
             # print(f"check, max_thread = {max_threads} , multithread = {multithread}")
     
-            tbl = self.client.open_table(collection_name)
             # number of a single query tokens
             total_queries = len(query_vector)
     
@@ -150,7 +152,19 @@ class lance_client_Amir(lance_client):
             num_batches = (total_queries + search_batch_size - 1) // search_batch_size
 
             def init_worker():
+                tid = threading.get_ident()
+                open_tbl_start = time.monotonic_ns()
                 self.thread_local_storage.tbl = self.client.open_table(collection_name)
+                open_tbl_end = time.monotonic_ns()
+                with thread_timing_lock_retr:
+                    thread_timing_retrieval[tid] = {
+                        "thread_start": open_tbl_start,
+                        "open_tbl_end": open_tbl_end,
+                        "search_profiles": [],  # placeholder, filled in by search_thread as tasks complete
+        }
+                
+
+
     
             def search_thread(start_idx, end_idx, batch_num):
                 # print("inside multi-thread search_thread")
@@ -162,14 +176,19 @@ class lance_client_Amir(lance_client):
                 # batch_size = end_idx - start_idx
                 actual_batch_size = end_idx - start_idx
                 # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
-
-                plan = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).analyze_plan()
+                if ignore_analyzes == False:
+                    plan = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).analyze_plan()
                 # print(f"{'*' * 50} Retrieval for thread = {tid} {'*' * 50}")
                 # print(plan)
                 # print(f"{'*' * 50}")
 
                 # t0 = time.monotonic_ns()
+                tbl_search_start = time.monotonic_ns()
                 b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                tbl_search_end = time.monotonic_ns()
+                with thread_timing_lock_retr:
+                    thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
+
                 # t_setup = time.monotonic_ns()
                 # arrow_result = lazy_plan.to_arrow()
                 # t_exec = time.monotonic_ns()
@@ -182,22 +201,22 @@ class lance_client_Amir(lance_client):
                 b_results = [b_results[i * topk : (i + 1) * topk] for i in range(actual_batch_size)]
     
                 results[start_idx:end_idx] = b_results
-                
-                tmp_dict = {
-                    "thread_id": tid,
-                    "token_batch_id": batch_num,
-                "plan": plan
-                }
-                for j, query_results in enumerate(b_results):
-                    token_id = start_idx + j  # global token index, not local j
-                    for result in query_results:
-                        patches_per_token.append({
-                            'token_id': token_id,
-                            'doc_id': result['doc_id'],
-                            'patch_id': result['seq_id']
-                        })
-                tmp_dict["patches_per_token"] = patches_per_token
-                Retrieval_stats[batch_num] = tmp_dict
+                if ignore_analyzes == False:
+                    tmp_dict = {
+                        "thread_id": tid,
+                        "token_batch_id": batch_num,
+                        "plan": plan
+                    } 
+                    for j, query_results in enumerate(b_results):
+                        token_id = start_idx + j  # global token index, not local j
+                        for result in query_results:
+                            patches_per_token.append({
+                                'token_id': token_id,
+                                'doc_id': result['doc_id'],
+                                'patch_id': result['seq_id']
+                            })
+                    tmp_dict["patches_per_token"] = patches_per_token
+                    Retrieval_stats[batch_num] = tmp_dict
                 # print(f"check from lancedb_api -> {Retrieval_stats}")
     
             # start_time = time.time()
@@ -205,29 +224,39 @@ class lance_client_Amir(lance_client):
             if max_threads == 1 or not multithread:
                 # Single-threaded search
                 # print("check -> inside the single thread")
+                tid = threading.get_ident()
+                open_tbl_start = time.monotonic_ns()
+                tbl = self.client.open_table(collection_name)
+                open_tbl_end = time.monotonic_ns()
+                thread_timing_retrieval[tid] = {
+                                            "thread_start": open_tbl_start,
+                                            "open_tbl_end": open_tbl_end,
+                                            "search_profiles": [],  # placeholder, filled in by search_thread as tasks complete
+                }
+                                                       
                 for i in tqdm(range(num_batches), desc="Searching batches"):
                     start_idx = i * search_batch_size
                     end_idx = min(start_idx + search_batch_size, total_queries)
                     b_vectors = query_vector[start_idx:end_idx]
                     actual_batch_size = end_idx - start_idx
                     ###
-                    plan = (
-                        tbl.search(b_vectors, vector_column_name='vector')
-                        .limit(topk)
-                        .nprobes(nprobe)
-                        .analyze_plan()
-                    )
+                    if ignore_analyzes == False:
+                        plan = (
+                            tbl.search(b_vectors, vector_column_name='vector')
+                            .limit(topk)
+                            .nprobes(nprobe)
+                            .analyze_plan()
+                        )
                     # print(f"{'*' * 50}")
                     # print(plan)
                     # print(f"{'*' * 50}")
 
-                    # t0 = time.monotonic_ns()
+                    tbl_search_start = time.monotonic_ns()
                     b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
-                    # t_setup = time.monotonic_ns()
-                    # arrow_result = lazy_plan.to_arrow()
-                    # t_exec = time.monotonic_ns()
-                    # b_results = arrow_result.to_pylist()
-                    # t_convert = time.monotonic_ns()
+                    tbl_search_end = time.monotonic_ns()
+                    thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
+
+         
                     
                     # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()
                     # here it shows that the retriever searches for top_k mathces for each query token
@@ -237,24 +266,24 @@ class lance_client_Amir(lance_client):
                         )
                     b_results = [b_results[i * topk : (i + 1) * topk] for i in range(actual_batch_size)]
                     results[start_idx:end_idx] = b_results
-                    tid = threading.get_ident()
-                    tmp_dict = {
-                        "thread_id": tid,
-                        "token_batch_id": i, 
-                        "plan": plan,
-                    }
-                    patches_per_token = []
-                    # The union of all top-k matches across all tokens will be returned as the result
-                    for j, query_results in enumerate(b_results):
-                        token_id = start_idx + j
-                        for result in query_results:
-                            patches_per_token.append({
-                                'token_id' : token_id,
-                                'doc_id': result['doc_id'],
-                                'patch_id': result['seq_id']
-                            })
-                    tmp_dict["patches_per_token"] = patches_per_token
-                    Retrieval_stats[i] = tmp_dict
+                    if ignore_analyzes == False:
+                        tmp_dict = {
+                            "thread_id": tid,
+                            "token_batch_id": i, 
+                            "plan": plan,
+                        }
+                        patches_per_token = []
+                        # The union of all top-k matches across all tokens will be returned as the result
+                        for j, query_results in enumerate(b_results):
+                            token_id = start_idx + j
+                            for result in query_results:
+                                patches_per_token.append({
+                                    'token_id' : token_id,
+                                    'doc_id': result['doc_id'],
+                                    'patch_id': result['seq_id']
+                                })
+                        tmp_dict["patches_per_token"] = patches_per_token
+                        Retrieval_stats[i] = tmp_dict
                 ##
                 # print("##Retrieval_stats under lancedb_api_amir.py##")
                 # print(Retrieval_stats)
@@ -296,4 +325,3 @@ class lance_client_Amir(lance_client):
             # there is too much in the function parameters
             return doc_ids
 
- 

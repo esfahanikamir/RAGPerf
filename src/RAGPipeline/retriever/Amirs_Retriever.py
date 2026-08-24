@@ -4,7 +4,7 @@ import torch
 import threading
 from .BaseRetriever import *
 # from vectordb.lancedb_api import Retrieval_stats
-from vectordb.lancedb_api_amir import Retrieval_stats
+from vectordb.lancedb_api_amir import Retrieval_stats, thread_timing_retrieval
 
 # to return the cpu core of each thread
 import ctypes
@@ -74,9 +74,10 @@ class AmirsRetriever(BaseRetriever):
         # results = self.db_client.query_search(embeddings, topk=50, collection_name=self.collection_name, output_fields=["vector", "seq_id", "doc_id", "filepath"])
         # search_params = {"metric_type": "IP", "params": {}}
 
-        global Retrieval_stats
+        global Retrieval_stats, thread_timing_retrieval
         batch_size = self.retrieval_batch_size
         Retrieval_stats.clear()
+        thread_timing_retrieval.clear()
         results = self.client.query_search_image(
             query_embeddings,
             # int(50),
@@ -86,11 +87,12 @@ class AmirsRetriever(BaseRetriever):
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
             max_threads = self.max_retrieval_threads,
             nprobe = self.nprobe,
+            ignore_analyzes = False,
             # search_params=search_params,
         )
         # print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")
         # print(f"check Amir_retriever -> {Retrieval_stats}")
-        return results, Retrieval_stats
+        return (results, Retrieval_stats, thread_timing_retrieval)
     
     def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
         # print(f"len(top_k_results) = {len(top_k_results)}")

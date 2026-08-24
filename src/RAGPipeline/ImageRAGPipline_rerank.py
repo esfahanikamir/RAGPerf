@@ -173,11 +173,15 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     # retrieval
                     log_time_breakdown("retrieve")
                     retrieval_start_time = time.monotonic_ns()
-                    results, Retrieval_stats = self.retriever.search_db_image(query)
+                    results, Retrieval_stats, thread_timing_retrieval = self.retriever.search_db_image(query)
                     retrieval_end_time = time.monotonic_ns()
                     cprint.iprintf(f"*** Retrieval done")
                     retrieval_stats_filename = f"Batch_{batch_num}_Query_{j}_retrieval_stats.csv"
                     retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
+
+                    retrieval_thread_profile_filename = f"Batch_{batch_num}_Query_{j}_retrieval_thread_profile.csv"
+                    retrieval_thread_profile_file = os.path.join(Logger().log_dirpath, retrieval_thread_profile_filename)
+                    save_thread_profiles(thread_timing_retrieval, retrieval_thread_profile_file)
 
                     fieldnames = [
                         "global_req#", "is_in_query_batch#", "token_id",
@@ -484,3 +488,34 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
             log_time_breakdown("done")
             
         return
+
+    import csv
+
+def save_thread_profiles(thread_timing_retrieval, filepath):
+    fieldnames = [
+        "thread_index",     # stable 0,1,2... assigned at save time, not the raw OS thread id
+        "raw_thread_id",     # keep the original too, in case you need it
+        "thread_start",
+        "open_tbl_end",
+        "open_table_time_ns",
+        "task_index",        # which search call this is, in order, for this thread
+        "search_start",
+        "search_end",
+        "search_duration_ns",
+    ]
+    with open(filepath, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for thread_index, (raw_tid, stats) in enumerate(sorted(thread_timing_retrieval.items())):
+            for task_index, (s_start, s_end) in enumerate(stats["search_profiles"]):
+                writer.writerow({
+                    "thread_index": thread_index,
+                    "raw_thread_id": raw_tid,
+                    "task_index": task_index,
+                    "thread_start": stats["thread_start"],
+                    "open_tbl_end": stats["open_tbl_end"],
+                    "open_table_time_ns": stats["open_tbl_end"] - stats["thread_start"],
+                    "search_start": s_start,
+                    "search_end": s_end,
+                    "search_duration_ns": s_end - s_start,
+                })
