@@ -32,94 +32,48 @@ class lance_client_Amir(lance_client):
         self.thread_local_storage = threading.local()
 
 
-    def query(self, collection_name, collection_abs_path, filter_expr, output_fields=None, limit=10):
+    def query(self, collection_name, collection_abs_path, filter_expr, output_fields=None, limit=10, ignore_analyzes = False,):
         # Force hardware memory cache drop to ensure true cold-start numbers
         # print(f"DB file to be evicted from cache -> {collection_abs_path}")
         # evict_file_from_ram(collection_abs_path)
         # proc = psutil.Process(os.getpid())
-        
-        # -------------------------------------------------------------
-        # STEP 1: OPEN TABLE METADATA
-        # -------------------------------------------------------------
-        # before_open = proc.io_counters()
-        t0 = time.monotonic_ns()
-        
-        tbl = self.client.open_table(collection_name)
-        
-        t1 = time.monotonic_ns()
-        # after_open = proc.io_counters()
+        if not hasattr(self.thread_local_storage, "tbl_cache"):
+            self.thread_local_storage.tbl_cache = {}
+        if collection_name not in self.thread_local_storage.tbl_cache:
+            self.thread_local_storage.tbl_cache[collection_name] = self.client.open_table(collection_name)
+        tbl = self.thread_local_storage.tbl_cache[collection_name]   # CHANGED: reuse cached handl
 
-        # -------------------------------------------------------------
-        # STEP 2: LAZY SEARCH INITIALIZATION
-        # -------------------------------------------------------------
         if output_fields is not None:
-            data_plan = tbl.search().where(filter_expr).select(output_fields).limit(limit)
+            if ignore_analyzes == False:
+                plan = tbl.search().where(filter_expr).select(output_fields).limit(limit).analyze_plan()
+            else:
+                plan = None
+            t_db_start = time.monotonic_ns()
+            query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit)
+            t_db_end = time.monotonic_ns()
+            query_df = query_res.to_pandas()
+            t_pd_end = time.monotonic_ns()
         else:
-            data_plan = tbl.search().where(filter_expr).limit(limit)
-            
-        t2 = time.monotonic_ns()
-        # after_setup = proc.io_counters()
-
-        # -------------------------------------------------------------
-        # STEP 3: PURE DATABASE EXECUTION (EAGER ARROW SCAN)
-        # -------------------------------------------------------------
-        # This forces LanceDB's Rust layer to complete all index-scanning,
-        # vector calculation, and raw physical disk storage lookups.
-        arrow_table = data_plan.to_arrow()
+            if ignore_analyzes == False:
+                plan = tbl.search().where(filter_expr).limit(limit).analyze_plan()
+            else:
+                plan = None
+            t_db_start = time.monotonic_ns()
+            query_res = tbl.search().where(filter_expr).limit(limit)
+            t_db_end = time.monotonic_ns()
+            query_df = query_res.to_pandas()
+            t_pd_end = time.monotonic_ns()
         
-        t3 = time.monotonic_ns()
-        # after_db_exec = proc.io_counters()
-
-        # -------------------------------------------------------------
-        # STEP 4: PANDAS DATA DATATYPE CONVERSION (CPU/MEM BOUND)
-        # -------------------------------------------------------------
-        # Pure Python memory space dictionary allocation and DataFrame copying.
-        query_df = arrow_table.to_pandas()
-        
-        t4 = time.monotonic_ns()
-        # after_pandas = proc.io_counters()
 
         # -------------------------------------------------------------
         # DICTIONARY REPORT PACKAGING
         # -------------------------------------------------------------
+        # t_db = t_db_end - t_db_start if ignore_analyzes == True else 0
         db_fetch_stats = {
-            "open_table_start": t0,
-            "open_table_time_ns": t1 - t0,
-            "lazy_search_start": t1,
-            "lazy_search_time_ns": t2 - t1,       # Near zero due to lazy execution
-            "db_fetch_pure_start" : t2,
-            "db_fetch_pure_time_ns": t3 - t2,     # Isolated LanceDB database execution runtime
-            "pandas_start": t3,
-            "pandas_time_ns": t4 - t3,            # Isolated Python dataframe creation runtime
-            "pandas_end" : t4
+            "db_plan": plan,
+            # "t_db": t_db,
+            "t_pandas": t_pd_end - t_db_end,            # Isolated Python dataframe creation runtime
         }
-
-        # Clean math calculation block function
-        # def calculate_diffs(start_counter, end_counter, label_prefix, stats_dict):
-        #     bytes_phys = end_counter.read_bytes - start_counter.read_bytes
-        #     chars_start = getattr(start_counter, 'read_chars', start_counter.read_bytes)
-        #     chars_end = getattr(end_counter, 'read_chars', end_counter.read_bytes)
-            
-        #     stats_dict[f"{label_prefix}_mb_phy"] = bytes_phys / (1024 ** 2)
-        #     stats_dict[f"{label_prefix}_mb_log"] = (chars_end - chars_start) / (1024 ** 2)
-
-        # # Run and append metrics explicitly to the reporting dictionary
-        # calculate_diffs(before_open, after_open, "open_table", db_fetch_stats)
-        # calculate_diffs(after_open, after_setup, "lazy_search", db_fetch_stats)
-        # calculate_diffs(after_setup, after_db_exec, "db_fetch_pure", db_fetch_stats)
-        # calculate_diffs(after_db_exec, after_pandas, "pandas", db_fetch_stats)
-
-        ##
-        # TEST
-        if output_fields is not None:
-            plan = tbl.search().where(filter_expr).select(output_fields).limit(limit).analyze_plan()
-        else:
-            plan = tbl.search().where(filter_expr).limit(limit).analyze_plan()
-
-        # print(f"{'#' * 50} RERANKING {'#' * 50}")
-        # print(plan)
-        # print(f"{'#' * 50} {'#' * 50}")
-        ##
 
         return (query_df, db_fetch_stats)
 
@@ -255,7 +209,7 @@ class lance_client_Amir(lance_client):
                     b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
                     tbl_search_end = time.monotonic_ns()
                     thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
-
+ 
          
                     
                     # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()

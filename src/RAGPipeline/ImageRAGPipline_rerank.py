@@ -12,7 +12,7 @@ from encoder.sentenceTransformerEncoder import SentenceTransformerEncoder
 from RAGPipeline.retriever.BaseRetriever import BaseRetriever
 
 from RAGPipeline.retriever.Amirs_Retriever import AmirsRetriever  
-from RAGPipeline.retriever.Amirs_Retriever import data_fetch_time, DotP_time, ProfilingStats
+from RAGPipeline.retriever.Amirs_Retriever import rerank_thread_stats
 # from RAGPipeline.retriever.Amirs_Retriever import  per_process_io_stat   
 
 
@@ -62,7 +62,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
     #     return chat_template
 
     def process(self, request, batch_size=2, dont_answer= False) -> None:
-        global data_fetch_time, DotP_time, ProfilingStats
+        global rerank_thread_stats
         # global per_process_io_stat  
         # ToDo: evict cache to get the page faults      
         if request.req_type == "query":
@@ -220,7 +220,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                                     })
 
 
-        # retrieval_start_time/end_time block and retrieval_time_log_path write removed entirely
+                    # retrieval_start_time/end_time block and retrieval_time_log_path write removed entirely
                     with open(retrieval_time_log_path, "a", newline="") as f:
                         writer = csv.writer(f)
                         # headers
@@ -232,13 +232,11 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
                     # Rerank Added by Amir
                     if self.reranker is not None:
-                        txt = f"\tBatch:{i}, Question:{j}, Reranking top-{self.reranker.top_n} from {len(results)} OR m_of_top_k = {self.retriever.m_of_top_k} candidate image pages (top_k = {self.retriever.top_k})\n"
+                        txt = f"\tBatch:{i}, Question:{j} of this batch, Reranking top-{self.reranker.top_n} from {len(results)} OR m_of_top_k = {self.retriever.m_of_top_k} candidate image pages (top_k = {self.retriever.top_k})\n"
                         batch_details += txt
                         cprint.iprintf(txt)
 
-                        data_fetch_time.clear()
-                        DotP_time.clear()
-                        ProfilingStats.clear()
+                        rerank_thread_stats.clear()
                         # per_process_io_stat.clear()
                         log_time_breakdown("rerank")
                         rerank_start_time = time.monotonic_ns()
@@ -246,7 +244,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
 
                         m_of_top_k = len(results)
-                        results = self.retriever.pdfimage_rerank(
+                        results, abstract_rerank_timing = self.retriever.pdfimage_rerank(
                             query_embeddings = query,
                             top_k_results = results,
                             top_n = self.reranker.top_n,
@@ -261,8 +259,8 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         # rerank_data_fetch_time_q = max(data_fetch_time.values()) if data_fetch_time else 0
                         # rerank_dotp_time_q    = max(DotP_time.values())    if DotP_time    else 0
 
-                        query_stat_filename = f"Batch_{batch_num}_Query_{j}_stats.csv"
-                        query_stats_file = os.path.join(Logger().log_dirpath, query_stat_filename)
+                        query_stat_filename_thread = f"Batch_{batch_num}_Query_{j}_rerank_thread_stats.csv"
+                        query_stats_file = os.path.join(Logger().log_dirpath, query_stat_filename_thread)
                         with open(query_stats_file, "w", newline="") as f:
                             writer = csv.writer(f)
                             # headers
@@ -271,81 +269,60 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                                 "query_id",
                                 "thread_id",
                                 "doc_id",
-                                "num_patches",
-                                "query_tokens",
-                                "data_fetch_time_ms",
+                                "t_doc_start",
                                 ##
-                                "open_table_start",
-                                "open_table_time_ms", 
-                                "lazy_search_start",
-                                "lazy_search_time_ms",
-                                "db_fetch_pure_start",
-                                "db_fetch_pure_time_ms",
-                                "pandas_start",
-                                "pandas_time_ms",
-                                # "open_table_mb_phy",
-                                # "open_table_mb_log",
-                                # "lazy_search_mb_phy",
-                                # "lazy_search_mb_log",
-                                # "db_fetch_pure_mb_phy",
-                                # "db_fetch_pure_mb_log",
-                                # "pandas_mb_phy",
-                                # "pandas_mb_log",
-                                ##
-                                "numpy_time_start",
-                                "numpy_time_ms",
-                                "numpy_time_end",
-                                "dotp_time_start",
-                                "dotp_time_ms",
-                                "dotp_time_end",
-                                "fetched_kb",
-                                "total_rerank_time_ms",
-                                "abs_start",
-                                "abs_end",
+                                "db_plan",
+                                "pandas_time_ms", 
+                                "np_time_ms",
+                                "maxsim_time_ms",
+                                "t_doc_end",
+                                "doc_process_time_ms",
                                 "cpu_core_start",
-                                "cpu_core_end"
+                                "cpu_core_end",
                             ])
-                            for doc_id, stats in sorted(ProfilingStats.items()):
-                                writer.writerow([
-                                    batch_num,
-                                    j,
-                                    stats["thread_id"],
-                                    doc_id,
-                                    stats["num_patches"],
-                                    stats["num_query_tokens"],
-                                    stats["data_fetch_time_ns"] / 1e6,
-                                    
-                                    ##
-                                    stats["detailed_fetch_stat"]["open_table_start"],
-                                    stats["detailed_fetch_stat"]["open_table_time_ns"] / 1e6,
-                                    stats["detailed_fetch_stat"]["lazy_search_start"],
-                                    stats["detailed_fetch_stat"]["lazy_search_time_ns"] / 1e6,
-                                    stats["detailed_fetch_stat"]["db_fetch_pure_start"],
-                                    stats["detailed_fetch_stat"]["db_fetch_pure_time_ns"] / 1e6,
-                                    stats["detailed_fetch_stat"]["pandas_start"],
-                                    stats["detailed_fetch_stat"]["pandas_time_ns"] / 1e6,
-                                    # stats["detailed_fetch_stat"]["open_table_mb_phy"],
-                                    # stats["detailed_fetch_stat"]["open_table_mb_log"],
-                                    # stats["detailed_fetch_stat"]["lazy_search_mb_phy"],
-                                    # stats["detailed_fetch_stat"]["lazy_search_mb_log"],
-                                    # stats["detailed_fetch_stat"]["db_fetch_pure_mb_phy"],
-                                    # stats["detailed_fetch_stat"]["db_fetch_pure_mb_log"],
-                                    # stats["detailed_fetch_stat"]["pandas_mb_phy"],
-                                    # stats["detailed_fetch_stat"]["pandas_mb_log"],
-                                    ##
-                                    stats["numpy_time_start"],
-                                    stats["numpy_time_ns"] / 1e6,
-                                    stats["numpy_time_end"],
-                                    stats["dotp_time_start"],
-                                    stats["dotp_time_ns"] / 1e6,
-                                    stats["dotp_time_end"],
-                                    stats["fetched_bytes"] / 1024,
-                                    stats["total_rerank_time"] / 1e6,
-                                    stats["abs_start"],
-                                    stats["abs_end"],
-                                    stats["cpu_core_start"],
-                                    stats["cpu_core_end"]
-                                ])
+                            for tid, stats in (rerank_thread_stats.items()):
+                                for doc_stat in stats["doc_stats"]:
+                                    writer.writerow([
+                                        batch_num,
+                                        j,
+                                        tid,
+                                        doc_stat["doc_id"],
+                                        ##
+                                        doc_stat["t_doc_start"],
+                                        doc_stat["db_plan"],
+                                        doc_stat["t_pandas"] / 1e6,
+                                        doc_stat["t_np"] / 1e6,
+                                        doc_stat["t_maxsim"] / 1e6,
+                                        doc_stat["t_doc_end"],
+                                        doc_stat["t_doc_process"] / 1e6,
+                                        doc_stat["cpu_core_start"],
+                                        doc_stat["cpu_core_end"]
+                                    ])
+
+                        query_stat_filename_abstract = f"Batch_{batch_num}_Query_{j}_rerank_general_stats.csv"
+                        query_stats_file = os.path.join(Logger().log_dirpath, query_stat_filename_abstract)
+                        with open(query_stats_file, "w", newline="") as f:
+                            writer = csv.writer(f)
+                            # headers
+                            writer.writerow([
+                                "batch_num",
+                                "query",
+                                "t_rerank_start",
+                                "t_rerank_join",
+                                "multithread_time_ms",
+                                "t_sort_done",
+                                "sort_time_ms"
+                            ])
+                            
+                            writer.writerow([
+                                batch_num,
+                                j,
+                                abstract_rerank_timing["t_rerank_start"],
+                                abstract_rerank_timing["t_rerank_join"],
+                                (abstract_rerank_timing["t_rerank_join"] - abstract_rerank_timing["t_rerank_start"]) / 1e6,
+                                abstract_rerank_timing["t_sort_done"],
+                                (abstract_rerank_timing["t_sort_done"] - abstract_rerank_timing["t_rerank_join"]) / 1e6
+                            ])
 
                             # f.write(f"\n{'$' * 20}\n"
                             #         f"minor_faults={per_process_io_stat['minor_faults']} "

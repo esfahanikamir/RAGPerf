@@ -13,15 +13,18 @@ def current_cpu() -> int:
     return _libc.sched_getcpu()
 
 # Global timing dictionaries
-data_fetch_time = {}  # doc_id -> seconds spent fetching from DB
-np_time = {}
-np_time_start = {}
-np_time_end = {}
-DotP_time = {}     # doc_id -> seconds spent on dot product / similarity
-DotP_time_start = {}
-DotP_time_end = {}
-ProfilingStats = {} # per thread
+# data_fetch_time = {}  # doc_id -> seconds spent fetching from DB
+# np_time = {}
+# np_time_start = {}
+# np_time_end = {}
+# maxsim_time = {}     # doc_id -> seconds spent on dot product / similarity
+# maxsim_time_start = {}
+# maxsim_time_end = {}
+# ProfilingStats = {} # per thread
 # per_process_io_stat = {} # per whole process
+
+rerank_thread_stats = {}          # keyed by native thread id
+rerank_thread_stats_lock = threading.Lock()
 
 # def get_process_io():
 #     stats = {}
@@ -32,6 +35,20 @@ ProfilingStats = {} # per thread
 #             stats[key.strip()] = int(value.strip())
 
 #     return stats
+
+def init_rerank_worker(client, collection_name):
+    tid = threading.get_native_id()
+    t0 = time.monotonic_ns()
+    if not hasattr(client.thread_local_storage, "tbl_cache"):
+        client.thread_local_storage.tbl_cache = {}
+    client.thread_local_storage.tbl_cache[collection_name] = client.client.open_table(collection_name)
+    t1 = time.monotonic_ns()
+    with rerank_thread_stats_lock:
+        rerank_thread_stats[tid] = {
+            "thread_start_time": t0,
+            "open_table_time_ns": t1 - t0,
+            "doc_stats": [],   # (doc_id, db_plan, t_pandas, numpy_time_ns, maxsim_time_ns) per call
+        }
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
@@ -96,6 +113,7 @@ class AmirsRetriever(BaseRetriever):
     
     def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
         # print(f"len(top_k_results) = {len(top_k_results)}")
+        t_rerank_start = time.monotonic_ns()
         
         self.m_of_top_k = min(self.m_of_top_k, len(top_k_results)) if self.m_of_top_k != 0 else len(top_k_results)
 
@@ -104,37 +122,31 @@ class AmirsRetriever(BaseRetriever):
         #     pass
 
         def rerank_single_doc(doc_id, data, client, collection_name, dotp_device):
+            tid = threading.get_native_id()
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             # here is the storage interaction part
             cpu_at_start = current_cpu()
-            t0 = time.monotonic_ns()
+            t_doc_start = time.monotonic_ns()
             (doc_colbert_vecs, detailed_fetch_stat) = client.query(
                 collection_name=collection_name,
                 collection_abs_path = self.collection_abs_path,
                 filter_expr=f"doc_id in ({doc_id})",
                 output_fields=["seq_id", "vector", "filepath"],
-                limit=1000,
+                limit=1024,
             )
             # print(f"inside rerank_single_doc: len(doc_colbert_vecs = {len(doc_colbert_vecs)})")
-            t1 = time.monotonic_ns()
-            data_fetch_time[doc_id] = t1 - t0
+            # t1 = time.monotonic_ns()
+            # data_fetch_time[doc_id] = t1 - t0
             # here is the part for the dot product computation -> currently on CPU
             if client.type == "lancedb":
                 t2 = time.monotonic_ns()
                 doc_vecs = np.vstack(doc_colbert_vecs["vector"].to_list())
                 t3 = time.monotonic_ns()
-                np_time[doc_id] = t3 - t2
-                np_time_start[doc_id] = t2
-                np_time_end[doc_id] = t3
 
                 if dotp_device == "cpu":
                     t4 = time.monotonic_ns()
                     score = np.dot(data, doc_vecs.T).max(1).sum()
                     t5 = time.monotonic_ns()
-                    DotP_time[doc_id] = t5 - t4
-                    DotP_time_start[doc_id] = t4
-                    DotP_time_end[doc_id] = t5
-
                     cpu_at_end = current_cpu()
                 # not for now
                 # elif dotp_device.startswith("cuda"):
@@ -144,30 +156,22 @@ class AmirsRetriever(BaseRetriever):
                 #     score = torch.matmul(data_tensor, doc_vecs_tensor.T).max(1).values.sum().item()
                 else:
                     raise ValueError(f"Unsupported dotp_device: {dotp_device}")
-
-                ProfilingStats[doc_id] = {
-                    # "thread_id": threading.get_ident(),
-                    "thread_id" : threading.get_native_id(),
-                    "data_fetch_time_ns": data_fetch_time[doc_id],
-                    "detailed_fetch_stat": detailed_fetch_stat, # {"open_table_time": ns, "lazy_search_time_ns": ns, "db_fetch_pure_time_ns": ns, pandas_time_ns, open_table_mb_phy, open_table_mb_log, lazy_search_mb_phy, lazy_search_mb_log, db_exec_pure_mb_phy, db_fetch_pure_log, pandas_mb_phy, pandas_mb_log}
-                    "numpy_time_ns": np_time[doc_id],
-                    "numpy_time_start" : np_time_start[doc_id],
-                    "numpy_time_end" : np_time_end[doc_id],
-                    "dotp_time_ns": DotP_time[doc_id],
-                    "dotp_time_start" : DotP_time_start[doc_id],
-                    "dotp_time_end" : DotP_time_end[doc_id],
-                    "num_patches": len(doc_colbert_vecs),
-                    "num_query_tokens": data.shape[0],
-                    "embedding_dim": 128,
-                    "fetched_bytes":
-                        len(doc_colbert_vecs) * 128 * 4,
-                    "total_rerank_time": t5 - t0,
-                    "abs_start" : t0,
-                    "abs_end" : t5,
-                    "cpu_core_start" : cpu_at_start,
-                    "cpu_core_end" : cpu_at_end
-                }
-                # print(f"doc_id = {doc_id}, num_patches = {len(doc_colbert_vecs)}, data_fetch_time = {data_fetch_time[doc_id]}, dotp_time = {DotP_time[doc_id]}")        
+            
+                with rerank_thread_stats_lock:
+                    rerank_thread_stats[tid]["doc_stats"].append(
+                        {
+                            "doc_id": doc_id,
+                            "t_doc_start": t_doc_start,
+                            "db_plan": detailed_fetch_stat["db_plan"],
+                            "t_pandas": detailed_fetch_stat["t_pandas"],
+                            "t_np": t3 - t2,
+                            "t_maxsim": t5 - t4,
+                            "t_doc_end": t5,
+                            "t_doc_process": t5 - t_doc_start,
+                            "cpu_core_start" : cpu_at_start,
+                            "cpu_core_end" : cpu_at_end,
+                        }
+                    )        
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])
             
             # elif client.type == "milvus":
@@ -202,7 +206,10 @@ class AmirsRetriever(BaseRetriever):
         # top_k_results = top_k_results[:max_docs]
 
         # with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_rerank_worker) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_rerank_worker,
+                initializer=init_rerank_worker,
+                initargs=(self.client, self.collection_name),
+                ) as executor:
             futures = {
                 executor.submit(
                     rerank_single_doc, doc_id, query_embeddings, self.client, self.collection_name, self.dotp_device
@@ -213,6 +220,7 @@ class AmirsRetriever(BaseRetriever):
             for future in concurrent.futures.as_completed(futures):
                 score, doc_id, filepath = future.result()
                 scores.append((score, doc_id, filepath))
+        t_join_threads = time.monotonic_ns()
 
         # io_after = get_process_io()
         # usage_after = resource.getrusage(resource.RUSAGE_SELF)
@@ -228,6 +236,7 @@ class AmirsRetriever(BaseRetriever):
         # per_process_io_stat["syscr"]= syscr
         
         scores.sort(key=lambda x: x[0], reverse=True)
+        t_sort_done = time.monotonic_ns()
 
         def GetPDF(filepath):
             """
@@ -248,4 +257,9 @@ class AmirsRetriever(BaseRetriever):
         else:
             for hits in scores:
                 images_list.append(GetPDF(hits[2]))
-        return images_list
+        abstract_rerank_timing = {
+            "t_rerank_start": t_rerank_start,
+            "t_rerank_join": t_join_threads,
+            "t_sort_done" : t_sort_done
+        }
+        return (images_list, abstract_rerank_timing)
