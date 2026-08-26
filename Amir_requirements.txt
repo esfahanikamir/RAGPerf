@@ -9,3 +9,4 @@ transformers==5.9.0
 vllm==0.21.0
 sentence-transformers==5.5.0
 psutil
+lancedb==0.37.1
