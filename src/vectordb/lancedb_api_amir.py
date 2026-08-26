@@ -45,22 +45,28 @@ class lance_client_Amir(lance_client):
 
         if output_fields is not None:
             if ignore_analyzes == False:
+                t_db_start = time.monotonic_ns()
                 plan = tbl.search().where(filter_expr).select(output_fields).limit(limit).analyze_plan()
+                t_db_end = time.monotonic_ns()
+                query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit)
             else:
                 plan = None
-            t_db_start = time.monotonic_ns()
-            query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit)
-            t_db_end = time.monotonic_ns()
+                t_db_start = time.monotonic_ns()
+                query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit)
+                t_db_end = time.monotonic_ns() 
             query_df = query_res.to_pandas()
             t_pd_end = time.monotonic_ns()
         else:
             if ignore_analyzes == False:
+                t_db_start = time.monotonic_ns()
                 plan = tbl.search().where(filter_expr).limit(limit).analyze_plan()
+                t_db_end = time.monotonic_ns()
+                query_res = tbl.search().where(filter_expr).limit(limit)
             else:
                 plan = None
-            t_db_start = time.monotonic_ns()
-            query_res = tbl.search().where(filter_expr).limit(limit)
-            t_db_end = time.monotonic_ns()
+                t_db_start = time.monotonic_ns() 
+                query_res = tbl.search().where(filter_expr).limit(limit)
+                t_db_end = time.monotonic_ns() 
             query_df = query_res.to_pandas()
             t_pd_end = time.monotonic_ns()
         
@@ -127,15 +133,18 @@ class lance_client_Amir(lance_client):
             actual_batch_size = end_idx - start_idx
             # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
             if ignore_analyzes == False:
+                tbl_search_start = time.monotonic_ns()
                 plan = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).analyze_plan()
+                tbl_search_end = time.monotonic_ns()
+                b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
             # print(f"{'*' * 50} Retrieval for thread = {tid} {'*' * 50}")
             # print(plan)
             # print(f"{'*' * 50}")
-
+            else:
             # t0 = time.monotonic_ns()
-            tbl_search_start = time.monotonic_ns()
-            b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
-            tbl_search_end = time.monotonic_ns()
+                tbl_search_start = time.monotonic_ns() 
+                b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                tbl_search_end = time.monotonic_ns() 
             with thread_timing_lock_retr:
                 thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
 
@@ -191,19 +200,23 @@ class lance_client_Amir(lance_client):
                 actual_batch_size = end_idx - start_idx
                 ###
                 if ignore_analyzes == False:
+                    tbl_search_start = time.monotonic_ns()
                     plan = (
                         tbl.search(b_vectors, vector_column_name='vector')
                         .limit(topk)
                         .nprobes(nprobe)
                         .analyze_plan()
                     )
+                    tbl_search_end = time.monotonic_ns()
+                    b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
                 # print(f"{'*' * 50}")
                 # print(plan)
                 # print(f"{'*' * 50}")
+                else:
 
-                tbl_search_start = time.monotonic_ns()
-                b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
-                tbl_search_end = time.monotonic_ns()
+                    tbl_search_start = time.monotonic_ns()
+                    b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                    tbl_search_end = time.monotonic_ns()
                 thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
 
         
