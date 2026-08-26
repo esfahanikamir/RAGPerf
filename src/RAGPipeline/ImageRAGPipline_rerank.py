@@ -94,7 +94,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
 
             # load models
-            log_time_breakdown("start")
+            log_time_breakdown("load_models")
             cprint.iprintf(f"*** Loading models")
             self.embedder.load_encoder()
             if dont_answer == False:
@@ -112,7 +112,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
             # for round_idx in range(0, nrounds):
             #     start_sample_idx = round_idx * batch_size
             #     questions, gt_answer = request.get_questions(batch_size, start_idx=start_sample_idx)
-            print(f"***Processing {request.req_count} questions")
+            cprint.iprintf(f"***Processing {request.req_count} questions")
 
             batch_embedding_time = [0] * nrounds
 
@@ -143,7 +143,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                 # gets {batch-size} questions
                 questions, gt_answer = request.get_questions(batch_size, start_idx=i)
 
-                print(f"there are {len(questions)} questoins for batch {batch_num}/{nrounds}")
+                cprint.iprintf(f"there are {len(questions)} questoins for batch {batch_num}/{nrounds}")
                 # print(f"questions for this round:\n {questions}")
                 with open(questions_path, "a") as f:
                     f.write(f"batch #{batch_num}\n")
@@ -158,9 +158,10 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                 # embedds a batch of questions (with colpali)
                 vectors = self.embedder.embedding_query(questions)
                 embedding_end_time = time.monotonic_ns()
-                print(f"len(vectors) = {len(vectors)}")
-                for vi, vector in enumerate(vectors):
-                    print(f"vector {vi}/total {len(vectors) - 1}\ntype {type(vector)}\nlen(this vector = {len(vector)})")
+                log_time_breakdown("embed_log")
+                # cprint.iprintf(f"len(vectors) = {len(vectors)}")
+                # for vi, vector in enumerate(vectors):
+                # cprint.iprintf(f"vector {vi}/total {len(vectors) - 1}\ntype {type(vector)}\nlen(this vector = {len(vector)})")
                 # self.embedder.free_encoder()
                 cprint.iprintf(f"*** Embedding done")
 
@@ -176,6 +177,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     results, Retrieval_stats, thread_timing_retrieval = self.retriever.search_db_image(query)
                     retrieval_end_time = time.monotonic_ns()
                     cprint.iprintf(f"*** Retrieval done")
+                    log_time_breakdown("retrieval_logs")
                     retrieval_stats_filename = f"Batch_{batch_num}_Query_{j}_retrieval_stats.csv"
                     retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
 
@@ -252,6 +254,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         )
                         # results = self.reranker.rerank(questions[j], results)
                         rerank_end_time = time.monotonic_ns()
+                        log_time_breakdown("rerank_logs")
                         # self.reranker.free_reranker()
 
                         # get the separate storage time and the dotproduct time per threads for each query
@@ -339,6 +342,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     prompt_start_time = time.monotonic_ns()
                     prompts = self.generate_prompt(questions[j], results)
                     prompt_end_time = time.monotonic_ns()
+                    log_time_breakdown("prompt_logs")
                     cprint.iprintf(f"*** Prompt generation done")
                     with open(prompt_path, "a") as fout:
                         for idx, prompt in enumerate(prompts):
@@ -355,6 +359,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         responses = self.responser.query_llm(prompts)
                     else:
                         responses = ["dont_answer = True"]
+                    log_time_breakdown("gen_logs")
                     generation_end_time = time.monotonic_ns()
                     # self.responser.free_llm()
                     cprint.iprintf(f"*** Generation done")
