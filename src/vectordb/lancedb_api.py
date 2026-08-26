@@ -322,8 +322,8 @@ class lance_client(DBInstance):
         collection_name,
         index_type,
         metric_type,
-        num_partitions=256,
-        num_sub_vectors=96,
+        num_partitions= None, # being calculated based on suggested heuristics (ivf-sq -> sqrt(num rows))
+        # num_sub_vectors=96, only applies to HNSW
         idx_name=None,
         drop_index=True,
         device=None,
@@ -334,10 +334,14 @@ class lance_client(DBInstance):
         print(f"  index_type: {index_type}", "green")
 
         tbl = self.client.open_table(collection_name)
+        import math
+        if num_partitions is None:
+            num_rows = tbl.count_rows()
+            num_partitions = max(1, round(math.sqrt(num_rows)))
         tbl.create_index(
             metric=metric_type,
             num_partitions=num_partitions,
-            num_sub_vectors=num_sub_vectors,
+            # num_sub_vectors=num_sub_vectors  only applies to hnsw
             vector_column_name='vector',
             replace=drop_index,
             accelerator=device,
@@ -346,8 +350,8 @@ class lance_client(DBInstance):
             num_bits=8,
             max_iterations=50,
             sample_rate=256,
-            m=20,
-            ef_construction=300,
+            # m=20   only applies to hnsw
+            # ef_construction=300   only applies to hnsw
         )
 
         return

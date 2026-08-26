@@ -79,203 +79,199 @@ class lance_client_Amir(lance_client):
 
     
     def query_search_image(
-            self,
-            query_vector, # token embeddings of a single question(query)
-            nprobe,
-            topk,
-            collection_name=None,
-            search_batch_size=1,
-            multithread=True,
-            max_threads=4,
-            consistency_level="Eventually",
-            output_fields=["text", "vector"],
-            ignore_analyzes = False,
-        ):
-            print(f"***Start query search in collection: {collection_name}")
-            # print(f"check, max_thread = {max_threads} , multithread = {multithread}")
-    
-            # number of a single query tokens
-            total_queries = len(query_vector)
-    
-            # Adjust search_batch_size if it exceeds total_queries
-            if search_batch_size > total_queries:
-                search_batch_size = total_queries
-    
-            results = [None] * total_queries
-    
-            num_batches = (total_queries + search_batch_size - 1) // search_batch_size
+        self,
+        query_vector, # token embeddings of a single question(query)
+        nprobe,
+        topk,
+        collection_name=None,
+        search_batch_size=1,
+        multithread=True,
+        max_threads=4,
+        consistency_level="Eventually",
+        output_fields=["text", "vector"],
+        ignore_analyzes = False,
+    ):
+        print(f"***Start query search in collection: {collection_name}")
+        # print(f"check, max_thread = {max_threads} , multithread = {multithread}")
 
-            def init_worker():
-                tid = threading.get_ident()
-                open_tbl_start = time.monotonic_ns()
-                self.thread_local_storage.tbl = self.client.open_table(collection_name)
-                open_tbl_end = time.monotonic_ns()
-                with thread_timing_lock_retr:
-                    thread_timing_retrieval[tid] = {
-                        "thread_start": open_tbl_start,
-                        "open_tbl_end": open_tbl_end,
-                        "search_profiles": [],  # placeholder, filled in by search_thread as tasks complete
-        }
-                
+        # number of a single query tokens
+        total_queries = len(query_vector)
 
+        # Adjust search_batch_size if it exceeds total_queries
+        if search_batch_size > total_queries:
+            search_batch_size = total_queries
 
-    
-            def search_thread(start_idx, end_idx, batch_num):
-                # print("inside multi-thread search_thread")
-                tid = threading.get_ident()
-                tbl = self.thread_local_storage.tbl
-                patches_per_token = []  # unified flat structure, same as single-threaded branch
+        results = [None] * total_queries
 
+        num_batches = (total_queries + search_batch_size - 1) // search_batch_size
+
+        def init_worker():
+            tid = threading.get_ident()
+            open_tbl_start = time.monotonic_ns()
+            self.thread_local_storage.tbl = self.client.open_table(collection_name)
+            open_tbl_end = time.monotonic_ns()
+            with thread_timing_lock_retr:
+                thread_timing_retrieval[tid] = {
+                    "thread_start": open_tbl_start,
+                    "open_tbl_end": open_tbl_end,
+                    "search_profiles": [],  # placeholder, filled in by search_thread as tasks complete
+                }
+        def search_thread(start_idx, end_idx, batch_num):
+            # print("inside multi-thread search_thread")
+            tid = threading.get_ident()
+            tbl = self.thread_local_storage.tbl
+            patches_per_token = []  # unified flat structure, same as single-threaded branch
+
+            b_vectors = query_vector[start_idx:end_idx]
+            # batch_size = end_idx - start_idx
+            actual_batch_size = end_idx - start_idx
+            # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
+            if ignore_analyzes == False:
+                plan = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).analyze_plan()
+            # print(f"{'*' * 50} Retrieval for thread = {tid} {'*' * 50}")
+            # print(plan)
+            # print(f"{'*' * 50}")
+
+            # t0 = time.monotonic_ns()
+            tbl_search_start = time.monotonic_ns()
+            b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+            tbl_search_end = time.monotonic_ns()
+            with thread_timing_lock_retr:
+                thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
+
+            # t_setup = time.monotonic_ns()
+            # arrow_result = lazy_plan.to_arrow()
+            # t_exec = time.monotonic_ns()
+            # b_results = arrow_result.to_pylist()
+            # t_convert = time.monotonic_ns()
+            if len(b_results) != actual_batch_size * topk:
+                raise ValueError(
+                    f"len(b_results) must be n*topk n = {actual_batch_size}, topk {topk}, but got {len(b_results)}"
+                )
+            b_results = [b_results[i * topk : (i + 1) * topk] for i in range(actual_batch_size)]
+
+            results[start_idx:end_idx] = b_results
+            if ignore_analyzes == False:
+                tmp_dict = {
+                    "thread_id": tid,
+                    "token_batch_id": batch_num,
+                    "plan": plan
+                } 
+                for j, query_results in enumerate(b_results):
+                    token_id = start_idx + j  # global token index, not local j
+                    for result in query_results:
+                        patches_per_token.append({
+                            'token_id': token_id,
+                            'doc_id': result['doc_id'],
+                            'patch_id': result['seq_id']
+                        })
+                tmp_dict["patches_per_token"] = patches_per_token
+                Retrieval_stats[batch_num] = tmp_dict
+            # print(f"check from lancedb_api -> {Retrieval_stats}")
+
+        # start_time = time.time()
+        # print(f"*** Start multithreaded search: total={self.retrieval_size}, batch_size={batch_size}, max_threads={max_threads}")
+        if max_threads == 1 or not multithread:
+            # Single-threaded search
+            # print("check -> inside the single thread")
+            tid = threading.get_ident()
+            open_tbl_start = time.monotonic_ns()
+            tbl = self.client.open_table(collection_name)
+            open_tbl_end = time.monotonic_ns()
+            thread_timing_retrieval[tid] = {
+                                        "thread_start": open_tbl_start,
+                                        "open_tbl_end": open_tbl_end,
+                                        "search_profiles": [],  # placeholder, filled in by search_thread as tasks complete
+            }
+                                                    
+            for i in tqdm(range(num_batches), desc="Searching batches"):
+                start_idx = i * search_batch_size
+                end_idx = min(start_idx + search_batch_size, total_queries)
                 b_vectors = query_vector[start_idx:end_idx]
-                # batch_size = end_idx - start_idx
                 actual_batch_size = end_idx - start_idx
-                # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
+                ###
                 if ignore_analyzes == False:
-                    plan = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).analyze_plan()
-                # print(f"{'*' * 50} Retrieval for thread = {tid} {'*' * 50}")
+                    plan = (
+                        tbl.search(b_vectors, vector_column_name='vector')
+                        .limit(topk)
+                        .nprobes(nprobe)
+                        .analyze_plan()
+                    )
+                # print(f"{'*' * 50}")
                 # print(plan)
                 # print(f"{'*' * 50}")
 
-                # t0 = time.monotonic_ns()
                 tbl_search_start = time.monotonic_ns()
                 b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
                 tbl_search_end = time.monotonic_ns()
-                with thread_timing_lock_retr:
-                    thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
+                thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
 
-                # t_setup = time.monotonic_ns()
-                # arrow_result = lazy_plan.to_arrow()
-                # t_exec = time.monotonic_ns()
-                # b_results = arrow_result.to_pylist()
-                # t_convert = time.monotonic_ns()
+        
+                
+                # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()
+                # here it shows that the retriever searches for top_k mathces for each query token
                 if len(b_results) != actual_batch_size * topk:
                     raise ValueError(
                         f"len(b_results) must be n*topk n = {actual_batch_size}, topk {topk}, but got {len(b_results)}"
                     )
                 b_results = [b_results[i * topk : (i + 1) * topk] for i in range(actual_batch_size)]
-    
                 results[start_idx:end_idx] = b_results
                 if ignore_analyzes == False:
                     tmp_dict = {
                         "thread_id": tid,
-                        "token_batch_id": batch_num,
-                        "plan": plan
-                    } 
+                        "token_batch_id": i, 
+                        "plan": plan,
+                    }
+                    patches_per_token = []
+                    # The union of all top-k matches across all tokens will be returned as the result
                     for j, query_results in enumerate(b_results):
-                        token_id = start_idx + j  # global token index, not local j
+                        token_id = start_idx + j
                         for result in query_results:
                             patches_per_token.append({
-                                'token_id': token_id,
+                                'token_id' : token_id,
                                 'doc_id': result['doc_id'],
                                 'patch_id': result['seq_id']
                             })
                     tmp_dict["patches_per_token"] = patches_per_token
-                    Retrieval_stats[batch_num] = tmp_dict
-                # print(f"check from lancedb_api -> {Retrieval_stats}")
-    
-            # start_time = time.time()
-            # print(f"*** Start multithreaded search: total={self.retrieval_size}, batch_size={batch_size}, max_threads={max_threads}")
-            if max_threads == 1 or not multithread:
-                # Single-threaded search
-                # print("check -> inside the single thread")
-                tid = threading.get_ident()
-                open_tbl_start = time.monotonic_ns()
-                tbl = self.client.open_table(collection_name)
-                open_tbl_end = time.monotonic_ns()
-                thread_timing_retrieval[tid] = {
-                                            "thread_start": open_tbl_start,
-                                            "open_tbl_end": open_tbl_end,
-                                            "search_profiles": [],  # placeholder, filled in by search_thread as tasks complete
-                }
-                                                       
-                for i in tqdm(range(num_batches), desc="Searching batches"):
+                    Retrieval_stats[i] = tmp_dict
+            ##
+            # print("##Retrieval_stats under lancedb_api_amir.py##")
+            # print(Retrieval_stats)
+
+        else:
+            # print("check -> inside the multi thread")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads, initializer=init_worker,) as executor:
+                futures = []
+                progress = tqdm(total=num_batches, desc="Searching batches")
+
+                def callback(future):
+                    progress.update(1)
+
+                for i in range(num_batches):
                     start_idx = i * search_batch_size
                     end_idx = min(start_idx + search_batch_size, total_queries)
-                    b_vectors = query_vector[start_idx:end_idx]
-                    actual_batch_size = end_idx - start_idx
-                    ###
-                    if ignore_analyzes == False:
-                        plan = (
-                            tbl.search(b_vectors, vector_column_name='vector')
-                            .limit(topk)
-                            .nprobes(nprobe)
-                            .analyze_plan()
-                        )
-                    # print(f"{'*' * 50}")
-                    # print(plan)
-                    # print(f"{'*' * 50}")
+                    future = executor.submit(search_thread, start_idx, end_idx, i)
+                    future.add_done_callback(callback)
+                    futures.append(future)
 
-                    tbl_search_start = time.monotonic_ns()
-                    b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
-                    tbl_search_end = time.monotonic_ns()
-                    thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
- 
-         
-                    
-                    # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).to_list()
-                    # here it shows that the retriever searches for top_k mathces for each query token
-                    if len(b_results) != actual_batch_size * topk:
-                        raise ValueError(
-                            f"len(b_results) must be n*topk n = {actual_batch_size}, topk {topk}, but got {len(b_results)}"
-                        )
-                    b_results = [b_results[i * topk : (i + 1) * topk] for i in range(actual_batch_size)]
-                    results[start_idx:end_idx] = b_results
-                    if ignore_analyzes == False:
-                        tmp_dict = {
-                            "thread_id": tid,
-                            "token_batch_id": i, 
-                            "plan": plan,
-                        }
-                        patches_per_token = []
-                        # The union of all top-k matches across all tokens will be returned as the result
-                        for j, query_results in enumerate(b_results):
-                            token_id = start_idx + j
-                            for result in query_results:
-                                patches_per_token.append({
-                                    'token_id' : token_id,
-                                    'doc_id': result['doc_id'],
-                                    'patch_id': result['seq_id']
-                                })
-                        tmp_dict["patches_per_token"] = patches_per_token
-                        Retrieval_stats[i] = tmp_dict
-                ##
-                # print("##Retrieval_stats under lancedb_api_amir.py##")
-                # print(Retrieval_stats)
+                concurrent.futures.wait(futures)
+                progress.close()
 
-            else:
-                # print("check -> inside the multi thread")
-    
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads, initializer=init_worker,) as executor:
-                    futures = []
-                    progress = tqdm(total=num_batches, desc="Searching batches")
-    
-                    def callback(future):
-                        progress.update(1)
-    
-                    for i in range(num_batches):
-                        start_idx = i * search_batch_size
-                        end_idx = min(start_idx + search_batch_size, total_queries)
-                        future = executor.submit(search_thread, start_idx, end_idx, i)
-                        future.add_done_callback(callback)
-                        futures.append(future)
-    
-                    concurrent.futures.wait(futures)
-                    progress.close()
-    
-            # end_time = time.time()
-            doc_ids = set()
-            patches_per_token = []
-            # here it shows that a union of all the top_k matches of all the tokens will be returned as the result
-            # with open("query.out", "w") as fout:
-            for i, query_results in enumerate(results):
-                patches_per_token.append({i : []})
-                # fout.write(f"query_results:\n{query_results}\n")
-                for result in query_results:
-                    doc_ids.add(result["doc_id"])
-                    # fout.write(f"result:\n{result}")
-    
-            print(f"***Query search completed.")
-            # The outputs are the doc_ids only -> nothing more implemented although 
-            # there is too much in the function parameters
-            return doc_ids
+        # end_time = time.time()
+        doc_ids = set()
+        patches_per_token = []
+        # here it shows that a union of all the top_k matches of all the tokens will be returned as the result
+        # with open("query.out", "w") as fout:
+        for i, query_results in enumerate(results):
+            patches_per_token.append({i : []})
+            # fout.write(f"query_results:\n{query_results}\n")
+            for result in query_results:
+                doc_ids.add(result["doc_id"])
+                # fout.write(f"result:\n{result}")
+
+        print(f"***Query search completed.")
+        # The outputs are the doc_ids only -> nothing more implemented although 
+        # there is too much in the function parameters
+        return doc_ids
 
