@@ -52,7 +52,7 @@ def init_rerank_worker(client, collection_name):
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, collection_abs_path, nprobe, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1
+        self, collection_name, collection_abs_path, nprobe, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1, ignore_analyzes = True
     ):
         self.nprobe = nprobe
         self.dotp_device = dotp_device
@@ -60,6 +60,7 @@ class AmirsRetriever(BaseRetriever):
         self.max_rerank_worker = max_rerank_worker
         self.m_of_top_k = m_of_top_k
         self.max_retrieval_threads = max_retrieval_threads
+        self.ignore_analyzes = ignore_analyzes
         super().__init__(
             collection_name = collection_name,
             top_k = top_k, 
@@ -104,7 +105,7 @@ class AmirsRetriever(BaseRetriever):
             output_fields=["vector", "seq_id", "doc_id", "filepath"],
             max_threads = self.max_retrieval_threads,
             nprobe = self.nprobe,
-            ignore_analyzes = False,
+            ignore_analyzes = self.ignore_analyzes,
             # search_params=search_params,
         )
         # print(f"inside search_db_image -> len(results) = # of pages after retrieval = {len(results)}")
@@ -133,6 +134,7 @@ class AmirsRetriever(BaseRetriever):
                 filter_expr=f"doc_id in ({doc_id})",
                 output_fields=["seq_id", "vector", "filepath"],
                 limit=1024,
+                ignore_analyzes = self.ignore_analyzes,
             )
             # print(f"inside rerank_single_doc: len(doc_colbert_vecs = {len(doc_colbert_vecs)})")
             # t1 = time.monotonic_ns()

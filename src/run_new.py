@@ -317,7 +317,8 @@ def main():
                     dotp_device = config["rag"]["reranking"]["device"],
                     max_rerank_worker=config["rag"]["retrieval"]["max_rerank_worker"],
                     m_of_top_k=config["rag"]["retrieval"]["m_of_top_k"],
-                    max_retrieval_threads = config["rag"]["retrieval"]["max_retrieval_threads"]
+                    max_retrieval_threads = config["rag"]["retrieval"]["max_retrieval_threads"],
+                    ignore_analyzes = False if config["rag"]["retrieval"]["ignore_analyzes"] == "false" else True
                 )
             responser = ImageResponser(
                 model=config["rag"]["generation"]["model"],
