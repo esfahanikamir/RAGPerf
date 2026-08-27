@@ -160,22 +160,23 @@ class lance_client_Amir(lance_client):
             b_results = [b_results[i * topk : (i + 1) * topk] for i in range(actual_batch_size)]
 
             results[start_idx:end_idx] = b_results
-            if ignore_analyzes == False:
-                tmp_dict = {
-                    "thread_id": tid,
-                    "token_batch_id": batch_num,
-                    "plan": plan
-                } 
-                for j, query_results in enumerate(b_results):
-                    token_id = start_idx + j  # global token index, not local j
-                    for result in query_results:
-                        patches_per_token.append({
-                            'token_id': token_id,
-                            'doc_id': result['doc_id'],
-                            'patch_id': result['seq_id']
-                        })
-                tmp_dict["patches_per_token"] = patches_per_token
-                Retrieval_stats[batch_num] = tmp_dict
+            
+            tmp_dict = {
+                "thread_id": tid,
+                "token_batch_id": batch_num,
+                "plan": plan if ignore_analyzes == False else None,   # only field that's conditional
+            }
+            patches_per_token = []
+            for j, query_results in enumerate(b_results):
+                token_id = start_idx + j
+                for result in query_results:
+                    patches_per_token.append({
+                        'token_id': token_id,
+                        'doc_id': result['doc_id'],
+                        'patch_id': result['seq_id']
+                    })
+            tmp_dict["patches_per_token"] = patches_per_token
+            Retrieval_stats[batch_num] = tmp_dict   # always runs now, regardless of ignore_analyzes
             # print(f"check from lancedb_api -> {Retrieval_stats}")
 
         # start_time = time.time()
