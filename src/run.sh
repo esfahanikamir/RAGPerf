@@ -56,6 +56,13 @@ export OMP_NUM_THREADS="$NCORES"
 export OPENBLAS_NUM_THREADS="$NCORES"
 export MKL_NUM_THREADS="$NCORES"
 
+# evict the OS level page cache
+# sync
+# echo 3 | sudo tee /proc/sys/vm/drop_caches
+#
+vmtouch -v /upb/users/a/amirk/scratch/UPB_phd/RAG/RAGPerf/RAGPerf_dbs/lance_pdfimage/vidore_v3_physics_ivfsq.lance
+# vmtouch -v /upb/users/a/amirk/scratch/UPB_phd/RAG/RAGPerf/RAGPerf_dbs/lance_pdfimage
+
 taskset -c "$CPUSET" python ./src/run_new.py \
-    --config ./config/pdfimage/lance_query_pdfimage_rerank_Vidore3_physiscs.yaml \
+    --config ./config/pdfimage/lance_query_pdfimage_rerank_Vidore3_physiscs_IVF_SQ.yaml\
     --msys-config ./config/monitor/example_config.yaml

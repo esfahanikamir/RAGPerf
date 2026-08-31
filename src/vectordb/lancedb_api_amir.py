@@ -13,7 +13,6 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Remove the dots completely
-from src.Amir_Helpers.storage_read_bytes_test import evict_file_from_ram
 
 
 
@@ -32,7 +31,8 @@ class lance_client_Amir(lance_client):
         self.thread_local_storage = threading.local()
 
 
-    def query(self, collection_name, collection_abs_path, filter_expr, output_fields=None, limit=10, ignore_analyzes = False,):
+    def query(self, collection_name, collection_abs_path, filter_expr, output_fields=None, limit=10, ignore_analyzes = False,): # rerank
+        # print(f"ignore = {ignore_analyzes}")
         # Force hardware memory cache drop to ensure true cold-start numbers
         # print(f"DB file to be evicted from cache -> {collection_abs_path}")
         # evict_file_from_ram(collection_abs_path)
@@ -69,7 +69,7 @@ class lance_client_Amir(lance_client):
                 t_db_end = time.monotonic_ns() 
             query_df = query_res.to_pandas()
             t_pd_end = time.monotonic_ns()
-        
+        # print(f"plan in rerank: {plan}")
 
         # -------------------------------------------------------------
         # DICTIONARY REPORT PACKAGING
@@ -84,7 +84,7 @@ class lance_client_Amir(lance_client):
         return (query_df, db_fetch_stats)
 
     
-    def query_search_image(
+    def query_search_image( # retrieve
         self,
         query_vector, # token embeddings of a single question(query)
         nprobe,
@@ -97,6 +97,7 @@ class lance_client_Amir(lance_client):
         output_fields=["text", "vector"],
         ignore_analyzes = False,
     ):
+        # print(f"ignore = {ignore_analyzes}")
         print(f"***Start query search in collection: {collection_name}")
         # print(f"check, max_thread = {max_threads} , multithread = {multithread}")
 
@@ -142,9 +143,11 @@ class lance_client_Amir(lance_client):
             # print(f"{'*' * 50}")
             else:
             # t0 = time.monotonic_ns()
+                plan = None
                 tbl_search_start = time.monotonic_ns() 
                 b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
-                tbl_search_end = time.monotonic_ns() 
+                tbl_search_end = time.monotonic_ns()
+            # print(f"plan in retrieve: {plan}")
             with thread_timing_lock_retr:
                 thread_timing_retrieval[tid]["search_profiles"].append((tbl_search_start, tbl_search_end))
 

@@ -41,21 +41,23 @@ rag:
     dont_answer: false 
     model: Qwen/Qwen2-VL-7B-Instruct
   retrieval:
-    question_num: 2
+    question_num: 1
     retrieval_batch_size: 1
-    max_retrieval_threads: 1
+    max_retrieval_threads: 16
     nprobe: 32
     top_k: 100
     device: cuda:0
-    max_rerank_worker: 1
+    max_rerank_worker: 16
     m_of_top_k: 0 # default=0
     ignore_analyzes: 0
+    evict_mem: 1
   reranking:
     # rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2 
     rerank_model: None
     top_n: 10
     # device: cuda:0 
     device: cpu
+    evict_mem: 1
   pipeline:
     batch_size: 1
 run_name: default_run

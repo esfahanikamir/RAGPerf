@@ -318,7 +318,9 @@ def main():
                     max_rerank_worker=config["rag"]["retrieval"]["max_rerank_worker"],
                     m_of_top_k=config["rag"]["retrieval"]["m_of_top_k"],
                     max_retrieval_threads = config["rag"]["retrieval"]["max_retrieval_threads"],
-                    ignore_analyzes = bool(int(config["rag"]["retrieval"]["ignore_analyzes"]))
+                    ignore_analyzes = bool(int(config["rag"]["retrieval"]["ignore_analyzes"])), 
+                    retrieval_evict_mem = bool(config["rag"]["retrieval"]["evict_mem"]),
+                    rerank_evict_mem = bool(config["rag"]["reranking"]["evict_mem"])
                 )
             responser = ImageResponser(
                 model=config["rag"]["generation"]["model"],

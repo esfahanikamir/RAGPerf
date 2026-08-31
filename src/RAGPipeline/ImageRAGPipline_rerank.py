@@ -25,6 +25,9 @@ import utils.colored_print as cprint
 from utils.logger import Logger, log_time_breakdown
 from qwen_vl_utils import process_vision_info
 
+from utils.page_cache_evict import evict_directory_pages, evict_file_pages
+from utils.vmtouch import check_vmtouch_residency
+
 
 # should make the pipeline fully modular with request queue passing
 
@@ -92,6 +95,10 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                             "total_time",
                         ])
 
+            # db_folder_path = os.path.join(self.retriever.client.db_path, self.retriever.collection_name, ".lance")
+            db_folder_path = f"{self.retriever.client.db_path}/{self.retriever.collection_name}.lance"
+            
+
 
             # load models
             log_time_breakdown("load_models")
@@ -158,7 +165,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                 # embedds a batch of questions (with colpali)
                 vectors = self.embedder.embedding_query(questions)
                 embedding_end_time = time.monotonic_ns()
-                log_time_breakdown("embed_log")
+                # log_time_breakdown("embed_log")
                 # cprint.iprintf(f"len(vectors) = {len(vectors)}")
                 # for vi, vector in enumerate(vectors):
                 # cprint.iprintf(f"vector {vi}/total {len(vectors) - 1}\ntype {type(vector)}\nlen(this vector = {len(vector)})")
@@ -172,12 +179,24 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     # print(f"query = {query}")
                     query = query.float().numpy()
                     # retrieval
+
+                    # print(db_folder_path)
+                    # print("before_evict_ret")
+                    # print(check_vmtouch_residency(db_folder_path))
+                    if(self.retriever.retrieval_evict_mem):
+                        print("evicting retrieval")
+                        evict_directory_pages(db_folder_path)
+                    else:
+                        print("not evicting retrieval")
+                    # print("after evict_ter")
+                    # print(check_vmtouch_residency(db_folder_path))
+                    
                     log_time_breakdown("retrieve")
                     retrieval_start_time = time.monotonic_ns()
                     results, Retrieval_stats, thread_timing_retrieval = self.retriever.search_db_image(query)
                     retrieval_end_time = time.monotonic_ns()
                     cprint.iprintf(f"*** Retrieval done")
-                    log_time_breakdown("retrieval_logs")
+                    # log_time_breakdown("retrieval_logs")
                     retrieval_stats_filename = f"Batch_{batch_num}_Query_{j}_retrieval_stats.csv"
                     retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
 
@@ -240,6 +259,19 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
                         rerank_thread_stats.clear()
                         # per_process_io_stat.clear()
+
+                        # print(db_folder_path)
+                        # print("before_evict_rerank")
+                        # print(check_vmtouch_residency(db_folder_path))
+                        if (self.retriever.rerank_evict_mem):
+                            print("reranker evict")
+                            evict_directory_pages(db_folder_path)
+                        else:
+                            print("reranker not evict")
+                        # print("after evict_rerank")
+                        # print(check_vmtouch_residency(db_folder_path))
+
+                                            
                         log_time_breakdown("rerank")
                         rerank_start_time = time.monotonic_ns()
                         # print(f"results:\n {results}")
@@ -254,7 +286,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         )
                         # results = self.reranker.rerank(questions[j], results)
                         rerank_end_time = time.monotonic_ns()
-                        log_time_breakdown("rerank_logs")
+                        # log_time_breakdown("rerank_logs")
                         # self.reranker.free_reranker()
 
                         # get the separate storage time and the dotproduct time per threads for each query
@@ -342,7 +374,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     prompt_start_time = time.monotonic_ns()
                     prompts = self.generate_prompt(questions[j], results)
                     prompt_end_time = time.monotonic_ns()
-                    log_time_breakdown("prompt_logs")
+                    # log_time_breakdown("prompt_logs")
                     cprint.iprintf(f"*** Prompt generation done")
                     with open(prompt_path, "a") as fout:
                         for idx, prompt in enumerate(prompts):
@@ -359,7 +391,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         responses = self.responser.query_llm(prompts)
                     else:
                         responses = ["dont_answer = True"]
-                    log_time_breakdown("gen_logs")
+                    # log_time_breakdown("gen_logs")
                     generation_end_time = time.monotonic_ns()
                     # self.responser.free_llm()
                     cprint.iprintf(f"*** Generation done")

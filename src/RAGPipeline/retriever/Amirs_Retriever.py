@@ -52,7 +52,7 @@ def init_rerank_worker(client, collection_name):
 
 class AmirsRetriever(BaseRetriever):
     def __init__(
-        self, collection_name, collection_abs_path, nprobe, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1, ignore_analyzes = True
+        self, collection_name, collection_abs_path, nprobe, retrieval_evict_mem, rerank_evict_mem, top_k=5, retrieval_batch_size=1, client= None, dotp_device = "cpu", max_rerank_worker = 1, m_of_top_k = 0, max_retrieval_threads = 1, ignore_analyzes = True
     ):
         self.nprobe = nprobe
         self.dotp_device = dotp_device
@@ -61,6 +61,8 @@ class AmirsRetriever(BaseRetriever):
         self.m_of_top_k = m_of_top_k
         self.max_retrieval_threads = max_retrieval_threads
         self.ignore_analyzes = ignore_analyzes
+        self.retrieval_evict_mem = retrieval_evict_mem
+        self.rerank_evict_mem = rerank_evict_mem
         super().__init__(
             collection_name = collection_name,
             top_k = top_k, 
@@ -86,7 +88,7 @@ class AmirsRetriever(BaseRetriever):
 
     #     return results
 
-    def search_db_image(self, query_embeddings):
+    def search_db_image(self, query_embeddings): # retrieve
         # Perform a vector search on the collection to find the top-k most similar documents.
         # topk set to a reasonable large num
         # results = self.db_client.query_search(embeddings, topk=50, collection_name=self.collection_name, output_fields=["vector", "seq_id", "doc_id", "filepath"])
@@ -112,7 +114,7 @@ class AmirsRetriever(BaseRetriever):
         # print(f"check Amir_retriever -> {Retrieval_stats}")
         return (results, Retrieval_stats, thread_timing_retrieval)
     
-    def pdfimage_rerank(self, query_embeddings, top_k_results, top_n):
+    def pdfimage_rerank(self, query_embeddings, top_k_results, top_n): # rerank
         # print(f"len(top_k_results) = {len(top_k_results)}")
         t_rerank_start = time.monotonic_ns()
         
