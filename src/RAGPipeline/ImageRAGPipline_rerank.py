@@ -184,10 +184,11 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     # print("before_evict_ret")
                     # print(check_vmtouch_residency(db_folder_path))
                     if(self.retriever.retrieval_evict_mem):
-                        print("evicting retrieval")
+                        # print("evicting retrieval")
                         evict_directory_pages(db_folder_path)
                     else:
-                        print("not evicting retrieval")
+                        # print("not evicting retrieval")
+                        pass
                     # print("after evict_ter")
                     # print(check_vmtouch_residency(db_folder_path))
                     
@@ -196,7 +197,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     results, Retrieval_stats, thread_timing_retrieval = self.retriever.search_db_image(query)
                     retrieval_end_time = time.monotonic_ns()
                     cprint.iprintf(f"*** Retrieval done")
-                    # log_time_breakdown("retrieval_logs")
+                    log_time_breakdown("retrieval_logs")
                     retrieval_stats_filename = f"Batch_{batch_num}_Query_{j}_retrieval_stats.csv"
                     retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
 
@@ -264,10 +265,11 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         # print("before_evict_rerank")
                         # print(check_vmtouch_residency(db_folder_path))
                         if (self.retriever.rerank_evict_mem):
-                            print("reranker evict")
+                            # print("reranker evict")
                             evict_directory_pages(db_folder_path)
                         else:
-                            print("reranker not evict")
+                            # print("reranker not evict")
+                            pass
                         # print("after evict_rerank")
                         # print(check_vmtouch_residency(db_folder_path))
 
@@ -286,7 +288,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         )
                         # results = self.reranker.rerank(questions[j], results)
                         rerank_end_time = time.monotonic_ns()
-                        # log_time_breakdown("rerank_logs")
+                        log_time_breakdown("rerank_logs")
                         # self.reranker.free_reranker()
 
                         # get the separate storage time and the dotproduct time per threads for each query
@@ -374,7 +376,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     prompt_start_time = time.monotonic_ns()
                     prompts = self.generate_prompt(questions[j], results)
                     prompt_end_time = time.monotonic_ns()
-                    # log_time_breakdown("prompt_logs")
+                    log_time_breakdown("prompt_logs")
                     cprint.iprintf(f"*** Prompt generation done")
                     with open(prompt_path, "a") as fout:
                         for idx, prompt in enumerate(prompts):
@@ -391,7 +393,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         responses = self.responser.query_llm(prompts)
                     else:
                         responses = ["dont_answer = True"]
-                    # log_time_breakdown("gen_logs")
+                    log_time_breakdown("gen_logs")
                     generation_end_time = time.monotonic_ns()
                     # self.responser.free_llm()
                     cprint.iprintf(f"*** Generation done")
