@@ -45,28 +45,30 @@ class lance_client_Amir(lance_client):
 
         if output_fields is not None:
             if ignore_analyzes == False:
-                t_db_start = time.monotonic_ns()
+                # t_db_start = time.monotonic_ns()
                 plan = tbl.search().where(filter_expr).select(output_fields).limit(limit).analyze_plan()
-                t_db_end = time.monotonic_ns()
+                # t_db_end = time.monotonic_ns()
                 query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit)
             else:
                 plan = None
-                t_db_start = time.monotonic_ns()
+                # t_db_start = time.monotonic_ns()
                 query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit)
-                t_db_end = time.monotonic_ns() 
+                # t_db_end = time.monotonic_ns()
+            t_pd_start = time.monotonic_ns()
             query_df = query_res.to_pandas()
             t_pd_end = time.monotonic_ns()
         else:
             if ignore_analyzes == False:
-                t_db_start = time.monotonic_ns()
+                # t_db_start = time.monotonic_ns()
                 plan = tbl.search().where(filter_expr).limit(limit).analyze_plan()
-                t_db_end = time.monotonic_ns()
+                # t_db_end = time.monotonic_ns()
                 query_res = tbl.search().where(filter_expr).limit(limit)
             else:
                 plan = None
                 t_db_start = time.monotonic_ns() 
                 query_res = tbl.search().where(filter_expr).limit(limit)
                 t_db_end = time.monotonic_ns() 
+            t_pd_start = time.monotonic_ns()
             query_df = query_res.to_pandas()
             t_pd_end = time.monotonic_ns()
         # print(f"plan in rerank: {plan}")
@@ -78,7 +80,8 @@ class lance_client_Amir(lance_client):
         db_fetch_stats = {
             "db_plan": plan,
             # "t_db": t_db,
-            "t_pandas": t_pd_end - t_db_end,            # Isolated Python dataframe creation runtime
+            "t_pandas": t_pd_end - t_pd_start,            # Isolated Python dataframe creation runtime
+            # NOTICE: pandas is not only pandas but the actual data transfer -> will be ignored in the final analyze
         }
 
         return (query_df, db_fetch_stats)
@@ -135,9 +138,9 @@ class lance_client_Amir(lance_client):
             # b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(3).to_list()
             if ignore_analyzes == False:
                 tbl_search_start = time.monotonic_ns()
-                plan = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).analyze_plan()
+                plan = tbl.search(b_vectors, vector_column_name='vector').select(output_fields).limit(topk).nprobes(nprobe).analyze_plan()
                 tbl_search_end = time.monotonic_ns()
-                b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                b_results = tbl.search(b_vectors, vector_column_name='vector').select(output_fields).limit(topk).nprobes(nprobe).to_list()
             # print(f"{'*' * 50} Retrieval for thread = {tid} {'*' * 50}")
             # print(plan)
             # print(f"{'*' * 50}")
@@ -145,7 +148,7 @@ class lance_client_Amir(lance_client):
             # t0 = time.monotonic_ns()
                 plan = None
                 tbl_search_start = time.monotonic_ns() 
-                b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                b_results = tbl.search(b_vectors, vector_column_name='vector').select(output_fields).limit(topk).nprobes(nprobe).to_list()
                 tbl_search_end = time.monotonic_ns()
             # print(f"plan in retrieve: {plan}")
             with thread_timing_lock_retr:
@@ -207,12 +210,13 @@ class lance_client_Amir(lance_client):
                     tbl_search_start = time.monotonic_ns()
                     plan = (
                         tbl.search(b_vectors, vector_column_name='vector')
+                        .select(output_fields)
                         .limit(topk)
                         .nprobes(nprobe)
                         .analyze_plan()
                     )
                     tbl_search_end = time.monotonic_ns()
-                    b_results = tbl.search(b_vectors, vector_column_name='vector').limit(topk).nprobes(nprobe).to_list()
+                    b_results = tbl.search(b_vectors, vector_column_name='vector').select(output_fields).limit(topk).nprobes(nprobe).to_list()
                 # print(f"{'*' * 50}")
                 # print(plan)
                 # print(f"{'*' * 50}")
