@@ -335,24 +335,74 @@ class lance_client(DBInstance):
 
         tbl = self.client.open_table(collection_name)
         import math
+        from lancedb import index as lancedb_index
+
+        # Normalize names supplied by the benchmark.
+        index_type = index_type.upper().replace("-", "_").strip()
+
+        # Map benchmark names to LanceDB configuration classes.
+        
         if num_partitions is None:
             num_rows = tbl.count_rows()
             num_partitions = max(1, round(math.sqrt(num_rows)))
+
+        # Build the appropriate configuration using your existing parameters.
+        if index_type == "IVF_FLAT":
+            config = lancedb_index.IvfFlat(
+                distance_type=metric_type,
+                num_partitions=num_partitions,
+            )
+        elif index_type == "IVF_SQ":
+            config = lancedb_index.IvfSq(
+                distance_type=metric_type,
+                num_partitions=num_partitions,
+            )
+        elif index_type == "IVF_PQ":
+            config = lancedb_index.IvfPq(
+                distance_type=metric_type,
+                num_partitions=num_partitions,
+                num_sub_vectors=96,  # Use your actual configured value
+                num_bits=8,
+                max_iterations=50,
+                sample_rate=256,
+            )
+        elif index_type == "IVF_RQ":
+            config = lancedb_index.IvfRq(
+                distance_type=metric_type,
+                num_partitions=num_partitions,
+            )
+        elif index_type == "HNSW_FLAT":
+            config = lancedb_index.HnswFlat(
+                distance_type=metric_type,
+            )
+        elif index_type == "HNSW_SQ":
+            config = lancedb_index.HnswSq(
+                distance_type=metric_type,
+            )
+        elif index_type == "HNSW_PQ":
+            config = lancedb_index.HnswPq(
+                distance_type=metric_type,
+                num_sub_vectors=96,
+                num_bits=8,
+            )
+        else:
+            raise ValueError(f"Unsupported index type: {index_type}")
+
         tbl.create_index(
-            metric=metric_type,
-            num_partitions=num_partitions,
-            # num_sub_vectors=num_sub_vectors  only applies to hnsw
-            vector_column_name='vector',
+            "vector",
+            config=config,
             replace=drop_index,
-            accelerator=device,
-            index_cache_size=32,
-            index_type=index_type,
-            num_bits=8,
-            max_iterations=50,
-            sample_rate=256,
-            # m=20   only applies to hnsw
-            # ef_construction=300   only applies to hnsw
+            name=idx_name,
         )
+
+
+        # for more efficient reranking search -> to be tested
+        # print(f"  building scalar index on: doc_id")
+        # tbl.create_scalar_index(
+        #     "doc_id",
+        #     index_type="BTREE",
+        #     replace=True,
+        # )
 
         return
 

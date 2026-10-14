@@ -45,28 +45,28 @@ class lance_client_Amir(lance_client):
 
         if output_fields is not None:
             if ignore_analyzes == False:
-                # t_db_start = time.monotonic_ns()
+                
                 plan = tbl.search().where(filter_expr).select(output_fields).limit(limit).analyze_plan()
-                # t_db_end = time.monotonic_ns()
-                query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit)
+                
+                query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit).to_arrow()
             else:
                 plan = None
-                # t_db_start = time.monotonic_ns()
-                query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit)
-                # t_db_end = time.monotonic_ns()
+                t_db_start = time.monotonic_ns()
+                query_res = tbl.search().where(filter_expr).select(output_fields).limit(limit).to_arrow()
+                t_db_end = time.monotonic_ns()
             t_pd_start = time.monotonic_ns()
             query_df = query_res.to_pandas()
             t_pd_end = time.monotonic_ns()
         else:
             if ignore_analyzes == False:
-                # t_db_start = time.monotonic_ns()
+                
                 plan = tbl.search().where(filter_expr).limit(limit).analyze_plan()
-                # t_db_end = time.monotonic_ns()
-                query_res = tbl.search().where(filter_expr).limit(limit)
+                
+                query_res = tbl.search().where(filter_expr).limit(limit).to_arrow()
             else:
                 plan = None
-                t_db_start = time.monotonic_ns() 
-                query_res = tbl.search().where(filter_expr).limit(limit)
+                t_db_start = time.monotonic_ns()
+                query_res = tbl.search().where(filter_expr).limit(limit).to_arrow()
                 t_db_end = time.monotonic_ns() 
             t_pd_start = time.monotonic_ns()
             query_df = query_res.to_pandas()
@@ -76,10 +76,10 @@ class lance_client_Amir(lance_client):
         # -------------------------------------------------------------
         # DICTIONARY REPORT PACKAGING
         # -------------------------------------------------------------
-        # t_db = t_db_end - t_db_start if ignore_analyzes == True else 0
+        t_db = t_db_end - t_db_start if ignore_analyzes else 0
         db_fetch_stats = {
             "db_plan": plan,
-            # "t_db": t_db,
+            "t_db": t_db,
             "t_pandas": t_pd_end - t_pd_start,            # Isolated Python dataframe creation runtime
             # NOTICE: pandas is not only pandas but the actual data transfer -> will be ignored in the final analyze
         }

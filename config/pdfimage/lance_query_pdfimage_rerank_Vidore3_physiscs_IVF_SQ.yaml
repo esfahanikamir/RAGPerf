@@ -43,13 +43,13 @@ rag:
   retrieval:
     question_num: 1
     retrieval_batch_size: 1
-    max_retrieval_threads: 16
+    max_retrieval_threads: 2
     nprobe: 32
     top_k: 100
     device: cuda:0
-    max_rerank_worker: 16
+    max_rerank_worker: 2
     m_of_top_k: 0 # default=0
-    ignore_analyzes: 0
+    ignore_analyzes: 1
     evict_mem: 1
   reranking:
     # rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2 

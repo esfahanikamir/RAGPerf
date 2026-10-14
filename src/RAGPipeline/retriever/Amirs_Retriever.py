@@ -47,7 +47,7 @@ def init_rerank_worker(client, collection_name):
         rerank_thread_stats[tid] = {
             "thread_start_time": t0,
             "open_table_time_ns": t1 - t0,
-            "doc_stats": [],   # (doc_id, db_plan, t_pandas, numpy_time_ns, maxsim_time_ns) per call
+            "doc_stats": [],   # (doc_id, db_plan, t_db, t_pandas, numpy_time_ns, maxsim_time_ns) per call
         }
 
 class AmirsRetriever(BaseRetriever):
@@ -168,6 +168,7 @@ class AmirsRetriever(BaseRetriever):
                             "doc_id": doc_id,
                             "t_doc_start": t_doc_start,
                             "db_plan": detailed_fetch_stat["db_plan"],
+                            "t_db": detailed_fetch_stat["t_db"],
                             "t_pandas": detailed_fetch_stat["t_pandas"],
                             "t_np": t3 - t2,
                             "t_maxsim": t5 - t4,

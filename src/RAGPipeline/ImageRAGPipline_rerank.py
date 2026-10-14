@@ -253,6 +253,8 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         ])
 
                     # Rerank Added by Amir
+                    if self.reranker is None:
+                        continue
                     if self.reranker is not None:
                         txt = f"\tBatch:{i}, Question:{j} of this batch, Reranking top-{self.reranker.top_n} from {len(results)} OR m_of_top_k = {self.retriever.m_of_top_k} candidate image pages (top_k = {self.retriever.top_k})\n"
                         batch_details += txt
@@ -309,6 +311,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                                 "t_doc_start",
                                 ##
                                 "db_plan",
+                                "db_time_ms",
                                 "pandas_time_ms", 
                                 "np_time_ms",
                                 "maxsim_time_ms",
@@ -327,6 +330,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                                         ##
                                         doc_stat["t_doc_start"],
                                         doc_stat["db_plan"],
+                                        doc_stat["t_db"] / 1e6,
                                         doc_stat["t_pandas"] / 1e6,
                                         doc_stat["t_np"] / 1e6,
                                         doc_stat["t_maxsim"] / 1e6,
