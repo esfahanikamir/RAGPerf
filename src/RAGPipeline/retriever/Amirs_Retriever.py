@@ -139,6 +139,7 @@ class AmirsRetriever(BaseRetriever):
                 limit=1024,
                 ignore_analyzes = self.ignore_analyzes,
             )
+            print("query done!")
             # print(f"inside rerank_single_doc: len(doc_colbert_vecs = {len(doc_colbert_vecs)})")
             # t1 = time.monotonic_ns()
             # data_fetch_time[doc_id] = t1 - t0
@@ -150,32 +151,35 @@ class AmirsRetriever(BaseRetriever):
 
                 if dotp_device == "cpu":
                     t4 = time.monotonic_ns()
+                    print("start scoring")
                     score = np.dot(data, doc_vecs.T).max(1).sum()
+                    print("end scoring")
                     t5 = time.monotonic_ns()
                     cpu_at_end = current_cpu()
                 # not for now
-                # elif dotp_device.startswith("cuda"):
-                #     t1 = time.monotonic_ns()
-                #     data_tensor    = torch.tensor(data, device="cuda", dtype=torch.float32)
-                #     doc_vecs_tensor = torch.tensor(doc_vecs, device="cuda", dtype=torch.float32)
-                #     score = torch.matmul(data_tensor, doc_vecs_tensor.T).max(1).values.sum().item()
+                elif dotp_device.startswith("cuda"):
+                    t4 = time.monotonic_ns()
+                    data_tensor    = torch.tensor(data, device="cuda", dtype=torch.float32)
+                    doc_vecs_tensor = torch.tensor(doc_vecs, device="cuda", dtype=torch.float32)
+                    score = torch.matmul(data_tensor, doc_vecs_tensor.T).max(1).values.sum().item()
+                    t5 = time.monotonic_ns()
                 else:
                     raise ValueError(f"Unsupported dotp_device: {dotp_device}")
             
                 with rerank_thread_stats_lock:
                     rerank_thread_stats[tid]["doc_stats"].append(
                         {
-                            "doc_id": doc_id,
-                            "t_doc_start": t_doc_start,
-                            "db_plan": detailed_fetch_stat["db_plan"],
-                            "t_db": detailed_fetch_stat["t_db"],
-                            "t_pandas": detailed_fetch_stat["t_pandas"],
-                            "t_np": t3 - t2,
-                            "t_maxsim": t5 - t4,
-                            "t_doc_end": t5,
-                            "t_doc_process": t5 - t_doc_start,
-                            "cpu_core_start" : cpu_at_start,
-                            "cpu_core_end" : cpu_at_end,
+                            # "doc_id": doc_id,
+                            # "t_doc_start": t_doc_start,
+                            # "db_plan": detailed_fetch_stat["db_plan"],
+                            # "t_db": detailed_fetch_stat["t_db"],
+                            # "t_pandas": detailed_fetch_stat["t_pandas"],
+                            # "t_np": t3 - t2,
+                            # "t_maxsim": t5 - t4,
+                            # "t_doc_end": t5,
+                            # "t_doc_process": t5 - t_doc_start,
+                            # "cpu_core_start" : cpu_at_start,
+                            # "cpu_core_end" : cpu_at_end,
                         }
                     )        
                 return (score, doc_id, doc_colbert_vecs["filepath"][0])
@@ -257,7 +261,7 @@ class AmirsRetriever(BaseRetriever):
 
         images_list = []
         if len(scores) >= top_n:
-            # scores[: top_n]
+            scores[: top_n]
             for hits in scores[: top_n]:
                 images_list.append(GetPDF(hits[2]))
         else:
@@ -268,4 +272,6 @@ class AmirsRetriever(BaseRetriever):
             "t_rerank_join": t_join_threads,
             "t_sort_done" : t_sort_done
         }
-        return (images_list, abstract_rerank_timing)
+        # return (images_list, abstract_rerank_timing)
+        print("RETURNING THE SCORES")
+        return (images_list, scores, abstract_rerank_timing)

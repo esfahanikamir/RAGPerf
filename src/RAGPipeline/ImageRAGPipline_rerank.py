@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import csv
+import lancedb
 import os
 import time
 import math
@@ -63,6 +64,31 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
     #         }
     #     ]
     #     return chat_template
+
+    def get_num_collection_docs(self):
+        import pyarrow as pa
+        db = lancedb.connect(self.retriever.client.db_path)
+        table = db.open_table(self.retriever.collection_name)
+        doc_ids = set()
+        filepaths = set()
+        total = 0
+        batch_size = 100_000
+        scanner = table.to_lance().scanner(
+            columns=["doc_id", "filepath"],
+            batch_size=batch_size
+        )
+
+        for batch in scanner.to_batches():
+            total += batch.num_rows
+            doc_ids.update(
+                x for x in batch.column("doc_id").to_pylist()
+                if x is not None
+            )
+            filepaths.update(
+                x for x in batch.column("filepath").to_pylist()
+                if x is not None
+            )
+        return len(doc_ids)
 
     def process(self, request, batch_size=2, dont_answer= False) -> None:
         global rerank_thread_stats
@@ -143,6 +169,14 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
 
             batch_total_time = [0] * nrounds
 
+            #hardcoded all the doc_ids in the dataset#
+            num_rows = self.get_num_collection_docs()
+            # print(f"num_rows = {num_rows}")
+            # fix this
+            # num_rows = 50
+            #end hardcoding#
+
+
             # for each batch
             for i in range(0, request.req_count, batch_size):
                 batch_details = ""
@@ -193,64 +227,70 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                     # print(check_vmtouch_residency(db_folder_path))
                     
                     log_time_breakdown("retrieve")
-                    retrieval_start_time = time.monotonic_ns()
-                    results, Retrieval_stats, thread_timing_retrieval = self.retriever.search_db_image(query)
-                    retrieval_end_time = time.monotonic_ns()
-                    cprint.iprintf(f"*** Retrieval done")
-                    log_time_breakdown("retrieval_logs")
-                    retrieval_stats_filename = f"Batch_{batch_num}_Query_{j}_retrieval_stats.csv"
-                    retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
+                    # retrieval_start_time = time.monotonic_ns()
+                    # results, Retrieval_stats, thread_timing_retrieval = self.retriever.search_db_image(query)
+                    # retrieval_end_time = time.monotonic_ns()
+                    # cprint.iprintf(f"*** Retrieval done")
+                    # log_time_breakdown("retrieval_logs")
+                    # retrieval_stats_filename = f"Batch_{batch_num}_Query_{j}_retrieval_stats.csv"
+                    # retrieval_stats_file = os.path.join(Logger().log_dirpath, retrieval_stats_filename)
 
-                    retrieval_thread_profile_filename = f"Batch_{batch_num}_Query_{j}_retrieval_thread_profile.csv"
-                    retrieval_thread_profile_file = os.path.join(Logger().log_dirpath, retrieval_thread_profile_filename)
-                    save_thread_profiles(thread_timing_retrieval, retrieval_thread_profile_file)
+                    # retrieval_thread_profile_filename = f"Batch_{batch_num}_Query_{j}_retrieval_thread_profile.csv"
+                    # retrieval_thread_profile_file = os.path.join(Logger().log_dirpath, retrieval_thread_profile_filename)
+                    # save_thread_profiles(thread_timing_retrieval, retrieval_thread_profile_file)
 
-                    fieldnames = [
-                        "global_req#", "is_in_query_batch#", "token_id",
-                        "in_token_batch#", "by_thread#", "plan",
-                        "doc_id", "patch_id"
-                    ]
+                    # fieldnames = [
+                    #     "global_req#", "is_in_query_batch#", "token_id",
+                    #     "in_token_batch#", "by_thread#", "plan",
+                    #     "doc_id", "patch_id"
+                    # ]
 
-                    with open(retrieval_stats_file, "w", newline="") as f:
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        writer.writeheader()
-                        for token_batch, stats in sorted(Retrieval_stats.items()):
-                            first = True
-                            for patch in stats["patches_per_token"]:
-                                if first:
-                                    writer.writerow({
-                                        "global_req#": i,                    # now correctly the outer batch-start index
-                                        "is_in_query_batch#": j,
-                                        "token_id": patch["token_id"],        # fixed: was stats["token_id"]
-                                        "in_token_batch#": stats["token_batch_id"],
-                                        "by_thread#": stats["thread_id"],
-                                        "plan": stats["plan"],
-                                        "doc_id": patch["doc_id"],
-                                        "patch_id": patch["patch_id"],
-                                    })
-                                    first = False
-                                else:
-                                    writer.writerow({
-                                        "global_req#": "_",                    # now correctly the outer batch-start index
-                                        "is_in_query_batch#": "_",
-                                        "token_id": "_",        # fixed: was stats["token_id"]
-                                        "in_token_batch#": "_",
-                                        "by_thread#": "_",
-                                        "plan": "_",
-                                        "doc_id": patch["doc_id"],
-                                        "patch_id": patch["patch_id"],
-                                    })
+                    # with open(retrieval_stats_file, "w", newline="") as f:
+                    #     writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    #     writer.writeheader()
+                    #     for token_batch, stats in sorted(Retrieval_stats.items()):
+                    #         first = True
+                    #         for patch in stats["patches_per_token"]:
+                    #             if first:
+                    #                 writer.writerow({
+                    #                     "global_req#": i,                    # now correctly the outer batch-start index
+                    #                     "is_in_query_batch#": j,
+                    #                     "token_id": patch["token_id"],        # fixed: was stats["token_id"]
+                    #                     "in_token_batch#": stats["token_batch_id"],
+                    #                     "by_thread#": stats["thread_id"],
+                    #                     "plan": stats["plan"],
+                    #                     "doc_id": patch["doc_id"],
+                    #                     "patch_id": patch["patch_id"],
+                    #                 })
+                    #                 first = False
+                    #             else:
+                    #                 writer.writerow({
+                    #                     "global_req#": "_",                    # now correctly the outer batch-start index
+                    #                     "is_in_query_batch#": "_",
+                    #                     "token_id": "_",        # fixed: was stats["token_id"]
+                    #                     "in_token_batch#": "_",
+                    #                     "by_thread#": "_",
+                    #                     "plan": "_",
+                    #                     "doc_id": patch["doc_id"],
+                    #                     "patch_id": patch["patch_id"],
+                    #                 })
 
 
-                    # retrieval_start_time/end_time block and retrieval_time_log_path write removed entirely
-                    with open(retrieval_time_log_path, "a", newline="") as f:
-                        writer = csv.writer(f)
-                        # headers
-                        writer.writerow([
-                            f"{i}",
-                            f"{j}",
-                            f"{retrieval_end_time - retrieval_start_time}",
-                        ])
+                    # # retrieval_start_time/end_time block and retrieval_time_log_path write removed entirely
+                    # with open(retrieval_time_log_path, "a", newline="") as f:
+                    #     writer = csv.writer(f)
+                    #     # headers
+                    #     writer.writerow([
+                    #         f"{i}",
+                    #         f"{j}",
+                    #         f"{retrieval_end_time - retrieval_start_time}",
+                    #     ])
+
+
+                    # the retriever part is commented out and all the doc_ids are being passed to the reranker to get the complete scores
+                    # fix this
+                    # num_rows = 50
+                    results = set(range(num_rows))
 
                     # Rerank Added by Amir
                     if self.reranker is None:
@@ -279,10 +319,11 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         log_time_breakdown("rerank")
                         rerank_start_time = time.monotonic_ns()
                         # print(f"results:\n {results}")
+                        
 
 
                         m_of_top_k = len(results)
-                        results, abstract_rerank_timing = self.retriever.pdfimage_rerank(
+                        results, scores, abstract_rerank_timing = self.retriever.pdfimage_rerank(
                             query_embeddings = query,
                             top_k_results = results,
                             top_n = self.reranker.top_n,
@@ -291,6 +332,7 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         # results = self.reranker.rerank(questions[j], results)
                         rerank_end_time = time.monotonic_ns()
                         log_time_breakdown("rerank_logs")
+                        print(f"rerank done for j = {j}")
                         # self.reranker.free_reranker()
 
                         # get the separate storage time and the dotproduct time per threads for each query
@@ -298,72 +340,48 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         # rerank_data_fetch_time_q = max(data_fetch_time.values()) if data_fetch_time else 0
                         # rerank_dotp_time_q    = max(DotP_time.values())    if DotP_time    else 0
 
-                        query_stat_filename_thread = f"Batch_{batch_num}_Query_{j}_rerank_thread_stats.csv"
-                        query_stats_file = os.path.join(Logger().log_dirpath, query_stat_filename_thread)
+                        query_scored = f"Batch_{batch_num}_Query_{j}_rerank_scored.csv"
+                        query_stats_file = os.path.join(Logger().log_dirpath, query_scored)
                         with open(query_stats_file, "w", newline="") as f:
                             writer = csv.writer(f)
                             # headers
                             writer.writerow([
-                                "batch_num",
-                                "query_id",
-                                "thread_id",
+                                "score",
                                 "doc_id",
-                                "t_doc_start",
-                                ##
-                                "db_plan",
-                                "db_time_ms",
-                                "pandas_time_ms", 
-                                "np_time_ms",
-                                "maxsim_time_ms",
-                                "t_doc_end",
-                                "doc_process_time_ms",
-                                "cpu_core_start",
-                                "cpu_core_end",
+                                "file_path",
                             ])
-                            for tid, stats in (rerank_thread_stats.items()):
-                                for doc_stat in stats["doc_stats"]:
-                                    writer.writerow([
-                                        batch_num,
-                                        j,
-                                        tid,
-                                        doc_stat["doc_id"],
-                                        ##
-                                        doc_stat["t_doc_start"],
-                                        doc_stat["db_plan"],
-                                        doc_stat["t_db"] / 1e6,
-                                        doc_stat["t_pandas"] / 1e6,
-                                        doc_stat["t_np"] / 1e6,
-                                        doc_stat["t_maxsim"] / 1e6,
-                                        doc_stat["t_doc_end"],
-                                        doc_stat["t_doc_process"] / 1e6,
-                                        doc_stat["cpu_core_start"],
-                                        doc_stat["cpu_core_end"]
-                                    ])
+                            for score, doc_id, path in scores: 
+                                writer.writerow([
+                                    score, 
+                                    doc_id, 
+                                    path
+                                ])
+                        print(f"score file should be written now for j = {j}")
 
-                        query_stat_filename_abstract = f"Batch_{batch_num}_Query_{j}_rerank_general_stats.csv"
-                        query_stats_file = os.path.join(Logger().log_dirpath, query_stat_filename_abstract)
-                        with open(query_stats_file, "w", newline="") as f:
-                            writer = csv.writer(f)
-                            # headers
-                            writer.writerow([
-                                "batch_num",
-                                "query",
-                                "t_rerank_start",
-                                "t_rerank_join",
-                                "multithread_time_ms",
-                                "t_sort_done",
-                                "sort_time_ms"
-                            ])
+                        # query_stat_filename_abstract = f"Batch_{batch_num}_Query_{j}_rerank_general_stats.csv"
+                        # query_stats_file = os.path.join(Logger().log_dirpath, query_stat_filename_abstract)
+                        # with open(query_stats_file, "w", newline="") as f:
+                        #     writer = csv.writer(f)
+                        #     # headers
+                        #     writer.writerow([
+                        #         "batch_num",
+                        #         "query",
+                        #         "t_rerank_start",
+                        #         "t_rerank_join",
+                        #         "multithread_time_ms",
+                        #         "t_sort_done",
+                        #         "sort_time_ms"
+                        #     ])
                             
-                            writer.writerow([
-                                batch_num,
-                                j,
-                                abstract_rerank_timing["t_rerank_start"],
-                                abstract_rerank_timing["t_rerank_join"],
-                                (abstract_rerank_timing["t_rerank_join"] - abstract_rerank_timing["t_rerank_start"]) / 1e6,
-                                abstract_rerank_timing["t_sort_done"],
-                                (abstract_rerank_timing["t_sort_done"] - abstract_rerank_timing["t_rerank_join"]) / 1e6
-                            ])
+                        #     writer.writerow([
+                        #         batch_num,
+                        #         j,
+                        #         abstract_rerank_timing["t_rerank_start"],
+                        #         abstract_rerank_timing["t_rerank_join"],
+                        #         (abstract_rerank_timing["t_rerank_join"] - abstract_rerank_timing["t_rerank_start"]) / 1e6,
+                        #         abstract_rerank_timing["t_sort_done"],
+                        #         (abstract_rerank_timing["t_sort_done"] - abstract_rerank_timing["t_rerank_join"]) / 1e6
+                        #     ])
 
                             # f.write(f"\n{'$' * 20}\n"
                             #         f"minor_faults={per_process_io_stat['minor_faults']} "
@@ -374,6 +392,10 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                             #         )
                         cprint.iprintf(f"*** Reranking done")
                         
+                    ##
+                    # no need for the rest
+                    ##
+
 
                     # augment
                     log_time_breakdown("prompt")
@@ -409,22 +431,22 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                             fout.write(f"\n=== response {idx} for batch {batch_num}\nquestion #{j}:\n{questions[j]}===\n")
                             fout.write(response.strip() + "\n\n")
                     
-                    retrieval_time[batch_num][j] = retrieval_end_time - retrieval_start_time
-                    batch_retrieval_time[batch_num] += retrieval_time[batch_num][j]
+                    # # retrieval_time[batch_num][j] = retrieval_end_time - retrieval_start_time
+                    # batch_retrieval_time[batch_num] += retrieval_time[batch_num][j]
 
-                    # rerank_time[batch_num][j] = 0
-                    if self.reranker is not None:
-                        rerank_time[batch_num][j] = rerank_end_time - rerank_start_time
-                    else:
-                        rerank_time[batch_num][j] = 0
+                    # # rerank_time[batch_num][j] = 0
+                    # if self.reranker is not None:
+                    #     rerank_time[batch_num][j] = rerank_end_time - rerank_start_time
+                    # else:
+                    #     rerank_time[batch_num][j] = 0
 
-                    batch_rerank_time[batch_num] += rerank_time[batch_num][j]
+                    # batch_rerank_time[batch_num] += rerank_time[batch_num][j]
 
-                    prompt_time[batch_num][j] = prompt_end_time - prompt_start_time
-                    batch_prompt_time[batch_num] += prompt_time[batch_num][j]
+                    # prompt_time[batch_num][j] = prompt_end_time - prompt_start_time
+                    # batch_prompt_time[batch_num] += prompt_time[batch_num][j]
 
-                    generation_time[batch_num][j] = generation_end_time - generation_start_time
-                    batch_generation_time[batch_num] += generation_time[batch_num][j]
+                    # generation_time[batch_num][j] = generation_end_time - generation_start_time
+                    # batch_generation_time[batch_num] += generation_time[batch_num][j]
                     
                     # if self.reranker is not None:
                     #     txt_to_print_q = (
@@ -441,71 +463,71 @@ class ImagesRAGPipeline_rerank(ImagesRAGPipeline):
                         #     f.write(txt_to_print_q)
 
 
-                batch_total_time[batch_num] = (
-                    batch_embedding_time[batch_num] +
-                    batch_retrieval_time[batch_num] +
-                    batch_rerank_time[batch_num] +
-                    batch_prompt_time[batch_num] +
-                    batch_generation_time[batch_num]
-                )
+            #     batch_total_time[batch_num] = (
+            #         batch_embedding_time[batch_num] +
+            #         batch_retrieval_time[batch_num] +
+            #         batch_rerank_time[batch_num] +
+            #         batch_prompt_time[batch_num] +
+            #         batch_generation_time[batch_num]
+            #     )
 
-                txt_to_print = (
-                    f"At the end of batch {batch_num} processing {batch_size} queries \n"
+            #     txt_to_print = (
+            #         f"At the end of batch {batch_num} processing {batch_size} queries \n"
 
-                    f"\tbatch embedding time: {batch_embedding_time[batch_num]} ns ({batch_embedding_time[batch_num] / 1e9} s, ({batch_embedding_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
+            #         f"\tbatch embedding time: {batch_embedding_time[batch_num]} ns ({batch_embedding_time[batch_num] / 1e9} s, ({batch_embedding_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
 
-                    f"\tSum of retrieval times: {batch_retrieval_time[batch_num]} ns ({batch_retrieval_time[batch_num] / 1e9} s, ({batch_retrieval_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
+            #         f"\tSum of retrieval times: {batch_retrieval_time[batch_num]} ns ({batch_retrieval_time[batch_num] / 1e9} s, ({batch_retrieval_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
 
-                    f"*****\n\tRetrieval details:\n{batch_details}\n*****\n"
+            #         f"*****\n\tRetrieval details:\n{batch_details}\n*****\n"
 
-                    f"\tSum of reranking time: {batch_rerank_time[batch_num]} ns ({batch_rerank_time[batch_num] / 1e9} s, ({batch_rerank_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
+            #         f"\tSum of reranking time: {batch_rerank_time[batch_num]} ns ({batch_rerank_time[batch_num] / 1e9} s, ({batch_rerank_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
 
-                    f"\tSum of prompt times: {batch_prompt_time[batch_num]} ns ({batch_prompt_time[batch_num] / 1e9} s, ({batch_prompt_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
+            #         f"\tSum of prompt times: {batch_prompt_time[batch_num]} ns ({batch_prompt_time[batch_num] / 1e9} s, ({batch_prompt_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n"
 
-                    f"\tSum of generation times: {batch_generation_time[batch_num]} ns ({batch_generation_time[batch_num] / 1e9} s, ({batch_generation_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n" 
-                )
+            #         f"\tSum of generation times: {batch_generation_time[batch_num]} ns ({batch_generation_time[batch_num] / 1e9} s, ({batch_generation_time[batch_num] / batch_total_time[batch_num] * 100:.2f}%))\n" 
+            #     )
 
-                with open(output_path, "a") as f:
-                    f.write(txt_to_print)
-                    f.write("\n")
+            #     with open(output_path, "a") as f:
+            #         f.write(txt_to_print)
+            #         f.write("\n")
                 
-                print(txt_to_print)
+            #     print(txt_to_print)
             
-            t_embedding_time = sum(batch_embedding_time)
-            t_retrieval_time = sum(batch_retrieval_time)
-            t_rerank_time = sum(batch_rerank_time)
-            t_prompt_time = sum(batch_prompt_time)
-            t_generation_time = sum(batch_generation_time)
-            t_total_time = sum(batch_total_time)
+            # t_embedding_time = sum(batch_embedding_time)
+            # t_retrieval_time = sum(batch_retrieval_time)
+            # t_rerank_time = sum(batch_rerank_time)
+            # t_prompt_time = sum(batch_prompt_time)
+            # t_generation_time = sum(batch_generation_time)
+            # t_total_time = sum(batch_total_time)
 
-            txt_to_print = ("***Complete timing profile for all batches***\n" +
-                    # f"{i}\t" +
-                    f"Embedding: {t_embedding_time} : {(100 * t_embedding_time / t_total_time):.2f}%\n" +
-                    f"Retrieval: {t_retrieval_time} : {(100 * t_retrieval_time / t_total_time):.2f}%\n" +
-                    f"Re-ranking: {t_rerank_time} : {(100 * t_rerank_time / t_total_time):.2f}%\n" +
-                    f"Prompt: {t_prompt_time} : {(100 * t_prompt_time / t_total_time):.2f}%\n" +
-                    f"Generation: {t_generation_time} : {(100 * t_generation_time / t_total_time):.2f}%\n" +
-                    f"Total: {t_total_time}\n" 
-                    f"{'*' * 50}\n"
-            )
+            # txt_to_print = ("***Complete timing profile for all batches***\n" +
+            #         # f"{i}\t" +
+            #         f"Embedding: {t_embedding_time} : {(100 * t_embedding_time / t_total_time):.2f}%\n" +
+            #         f"Retrieval: {t_retrieval_time} : {(100 * t_retrieval_time / t_total_time):.2f}%\n" +
+            #         f"Re-ranking: {t_rerank_time} : {(100 * t_rerank_time / t_total_time):.2f}%\n" +
+            #         f"Prompt: {t_prompt_time} : {(100 * t_prompt_time / t_total_time):.2f}%\n" +
+            #         f"Generation: {t_generation_time} : {(100 * t_generation_time / t_total_time):.2f}%\n" +
+            #         f"Total: {t_total_time}\n" 
+            #         f"{'*' * 50}\n"
+            # )
             
-            with open(output_path, "a") as fout:
-                fout.write(txt_to_print)
+            # with open(output_path, "a") as fout:
+            #     fout.write(txt_to_print)
 
-            print(txt_to_print)
-            log_time_breakdown("free_models")
+            # print(txt_to_print)
+            # log_time_breakdown("free_models")
 
-            # finished
-            cprint.iprintf(f"*** Unloading models")
-            self.embedder.free_encoder()
-            if dont_answer == False:
-                self.responser.free_llm()
-            if self.reranker is not None:
-                # self.reranker.free_reranker()
-                # no reranker model -> dot.product
-                pass
-            cprint.iprintf(f"*** Unloading models done")
-            log_time_breakdown("done")
+            # # finished
+            # cprint.iprintf(f"*** Unloading models")
+            # self.embedder.free_encoder()
+            # if dont_answer == False:
+            #     self.responser.free_llm()
+            # if self.reranker is not None:
+            #     # self.reranker.free_reranker()
+            #     # no reranker model -> dot.product
+            #     pass
+            # cprint.iprintf(f"*** Unloading models done")
+            # log_time_breakdown("done")
             
         return
 
