@@ -193,6 +193,14 @@ def main():
                         )
                         print("PDFs downloaded")
 
+                        # change the name of the PDFs to ids
+                        pdfs = sorted([pdf for pdf in os.listdir(pdfs_dir) if pdf.endswith(".pdf")])
+                        for i, pdf in enumerate(pdfs):
+                            old_path = os.path.join(pdfs_dir, pdf)
+                            new_path = os.path.join(pdfs_dir, f"{i}.pdf")
+                            os.rename(old_path, new_path)
+
+
                     else:
                         print("Pdfs were already downloaded")
 
@@ -228,6 +236,16 @@ def main():
                 print(
                     f"***Embedding done, total {len(dict_list)} embeddings, time : {time.monotonic_ns()}"
                 )
+                print("start saving the embeddings to the pkl file")
+                import pickle
+                with open(f"{pages_dir}/embeddings.pkl", "wb") as f:
+                    pickle.dump(dict_list, f, protocol=pickle.HIGHEST_PROTOCOL)
+                print("embeddings saved to the pickle file")
+                print("###here are the first 10 elements to compare###")
+                for i in range(10):
+                    print(dict_list[i])
+                print("###---###")
+                return
 
             if config["rag"]["action"]["insert"]:
                 print(
