@@ -17,7 +17,7 @@ class VidoreImageRequest(WikipediaRequests):
             print("Downloading query dataset ...")
             os.makedirs(queries_folder_path, exist_ok=True)
             ds = load_dataset(f"vidore/{sub_dataset_name}", "queries")
-            if sub_dataset_name == "vidore_v3_industrial":
+            if sub_dataset_name in  ["vidore_v3_industrial", "vidore_v3_pharmaceuticals"]:
                 ds = ds.filter(lambda example: example["language"] == "english")
             ds.save_to_disk(queries_path)
             print(f"Saved queries to {queries_path}")

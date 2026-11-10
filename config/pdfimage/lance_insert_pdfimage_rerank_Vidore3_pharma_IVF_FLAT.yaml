@@ -41,7 +41,7 @@ rag:
     dont_answer: false 
     model: Qwen/Qwen2-VL-7B-Instruct
   retrieval:
-    question_num: 1
+    question_num: 364
     retrieval_batch_size: 1
     max_retrieval_threads: 1
     nprobe: 32

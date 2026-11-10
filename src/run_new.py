@@ -46,6 +46,7 @@ def main():
     from RAGPipeline.ImageRAGPipline import ImagesRAGPipeline
 
     from RAGPipeline.ImageRAGPipline_rerank import ImagesRAGPipeline_rerank
+    from RAGPipeline.ImagesRAGPipeline_rerank_save_q_embeddings import ImagesRAGPipeline_rerank_save_q_embeddings
 
     from RAGPipeline.retriever.BaseRetriever import BaseRetriever
 
@@ -360,7 +361,7 @@ def main():
                     )
                 else:
                     reranker = None
-                RAGPipline = ImagesRAGPipeline_rerank(
+                RAGPipline = ImagesRAGPipeline_rerank_save_q_embeddings(
                     retriever=retriever,
                     responser=responser,
                     embedder=embedder,
