@@ -18,6 +18,7 @@ int8/int4 clip value `c` (computed from the corpus, copied to the queries).
 | `reader.py` | `EmbeddingStore(dir)` reads either store |
 | `verify.py` | checks both stores and their consistency; writes reference top-k |
 | `check_db.cpp` | independent C++ check, reference decode functions and MaxSim |
+| `run_maxsim_all.sh` | scores every query against every page in every precision with `check_db` and saves the full rankings |
 
 Dependencies: NumPy (tqdm optional). The query pipeline additionally needs the RAGPerf environment.
 
@@ -67,4 +68,10 @@ python queries.py --src QUERY_DB --corpus CORPUS_DB_NEW --outdir QUERY_DB_NEW
 
 ```bash
 ./check_db maxsim CORPUS_DB QUERY_DB 128 1031 <max_tokens> 4096 int8 10 5
+```
+
+Reference scores of all queries against all pages, one file per precision (see the top of the script):
+
+```bash
+./run_maxsim_all.sh CORPUS_DB QUERY_DB OUT_DIR
 ```
