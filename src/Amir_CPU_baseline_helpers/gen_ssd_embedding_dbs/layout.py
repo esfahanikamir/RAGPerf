@@ -39,6 +39,7 @@ FORMAT_VERSION = 2
 KINDS = {
     "corpus": {"prefix": "emb", "metadata": "metadata.json"},
     "queries": {"prefix": "qry", "metadata": "query_metadata.json"},
+    "ivf": {"prefix": "ivf", "metadata": "ivf_metadata.json"},   # first-stage index, see build_ivf.py
 }
 
 
@@ -184,6 +185,65 @@ def write_precision(outdir, prefix, precision, records, counts, slots, dim, pad,
     return info
 
 
+def write_dense(outdir, fname, precision, chunks, n, dim, pad, c):
+    """Write n vectors back to back with NO padding between them, then zero bytes
+    up to the next multiple of `pad` at the very end of the file. Used by the IVF
+    store, where vector number m of a file starts at byte m * bytes_per_vector.
+
+    chunks : iterable of float32 arrays (k, dim) whose rows, in order, are the n vectors.
+    Every value goes through quantize.encode(), like in write_precision().
+    """
+    p = Q.canonical_precision(precision)
+    bpv = Q.bytes_per_vector(p, dim)
+    path = os.path.join(outdir, fname)
+    tmp = path + ".tmp"
+    h = hashlib.sha256()
+    done = total = exact = clipped = 0
+    with open(tmp, "wb") as f:
+        for x in chunks:
+            x = np.ascontiguousarray(x, dtype=np.float32)
+            if x.ndim != 2 or x.shape[1] != dim:
+                raise ValueError("%s: chunk has shape %s, expected (k, %d)" % (fname, x.shape, dim))
+            if not np.all(np.isfinite(x)):
+                raise ValueError("%s: NaN or Inf in the data" % fname)
+            enc = Q.encode(p, x, c)
+            f.write(enc)
+            h.update(enc)
+            done += x.shape[0]
+            total += x.size
+            if p in ("fp16", "bf16"):
+                exact += int(np.count_nonzero(np.asarray(Q.decode(p, enc, dim), dtype=np.float32) == x))
+            elif Q.needs_clip(p):
+                clipped += int(np.count_nonzero(np.abs(x) > np.float32(c)))
+        if done != n:
+            raise ValueError("%s: got %d vectors, expected %d" % (fname, done, n))
+        tail = np.zeros(round_up(n * bpv, pad) - n * bpv, dtype=np.uint8)
+        f.write(tail)
+        h.update(tail)
+    size = os.path.getsize(tmp)
+    if size != round_up(n * bpv, pad):
+        os.remove(tmp)
+        raise IOError("%s: wrote %d bytes, expected %d" % (fname, size, round_up(n * bpv, pad)))
+    _replace_file(tmp, path)
+    info = {"file": fname, "vectors": int(n), "bytes_per_vector": bpv, "payload_bytes": int(n * bpv),
+            "file_bytes": int(size), "sha256": h.hexdigest()}
+    if p in ("fp16", "bf16"):
+        info["fraction_exact_vs_fp32"] = exact / float(total)
+    elif Q.needs_clip(p):
+        info["fraction_clipped"] = clipped / float(total)
+    return info
+
+
+def write_table(outdir, fname, arr, dtype):
+    """Write a 1-D integer table (little-endian) and return its metadata block."""
+    a = np.ascontiguousarray(arr).astype(dtype)
+    if not np.array_equal(a, arr):
+        raise ValueError("%s: values do not fit %s" % (fname, dtype))
+    _write_table(os.path.join(outdir, fname), a)
+    return {"file": fname, "dtype": dtype, "entries": int(a.size), "file_bytes": int(a.nbytes),
+            "sha256": sha256_file(os.path.join(outdir, fname))}
+
+
 def base_metadata(kind, num_records, slots, dim, pad):
     """Keys shared by the corpus and the query metadata file."""
     if kind not in KINDS:
@@ -219,7 +279,7 @@ def remove_store_files(outdir, kind):
     if os.path.exists(mpath):
         os.remove(mpath)
     for name in os.listdir(outdir):
-        if name.startswith(k["prefix"] + "_") and name.split(".")[-1] in ("bin", "u64", "u32", "tmp"):
+        if name.startswith(k["prefix"] + "_") and name.split(".")[-1] in ("bin", "u64", "u32", "u16", "tmp"):
             os.remove(os.path.join(outdir, name))
 
 
@@ -239,10 +299,9 @@ def load_metadata(outdir, kind=None):
     found = [k for k in KINDS if os.path.exists(os.path.join(outdir, KINDS[k]["metadata"]))]
     if kind is None:
         if not found:
-            raise IOError("%s holds neither %s nor %s" % (outdir, KINDS["corpus"]["metadata"],
-                                                         KINDS["queries"]["metadata"]))
+            raise IOError("%s holds none of %s" % (outdir, ", ".join(KINDS[k]["metadata"] for k in KINDS)))
         if len(found) > 1:
-            raise ValueError("%s holds both a corpus and a query store; pass kind='corpus' or 'queries'" % outdir)
+            raise ValueError("%s holds several stores (%s); pass kind=..." % (outdir, ", ".join(found)))
         kind = found[0]
     elif kind not in found:
         raise IOError("%s has no %s" % (outdir, KINDS[kind]["metadata"]))

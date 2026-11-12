@@ -131,3 +131,91 @@ class EmbeddingStore(object):
 
 def read_doc(outdir, precision, idx, binary="bits"):
     return EmbeddingStore(outdir).get(precision, idx, binary=binary)
+
+
+class IVFStore(object):
+    """Reader for the L1 (first-stage) IVF store written by build_ivf.py.
+
+    Everything is indexed by MEMBER NUMBER m (0 .. num_vectors-1). Members are grouped by
+    cluster: cluster j owns members first[j] .. first[j+1]-1, i.e. counts[j] of them.
+
+        ivf = IVFStore("/path/to/IVF_DB")
+        C = ivf.centroids("fp32")            # (nlist, dim)
+        M = ivf.members("int8", 17)          # (counts[17], dim) codes of cluster 17
+        ivf.member_doc[m], ivf.member_pos[m] # page record and vector number inside that page
+    """
+
+    def __init__(self, outdir):
+        self.outdir = outdir
+        self.kind, self.meta = L.load_metadata(outdir, "ivf")
+        m = self.meta
+        self.dim = int(m["dim"])
+        self.pad = int(m["pad_bytes"])
+        self.nlist = int(m["nlist"])
+        self.num_vectors = int(m["num_vectors"])
+        self.clip_c = Q.clip_from_meta(m)
+        t = m["tables"]
+        rd = lambda key: np.fromfile(os.path.join(outdir, t[key]["file"]), dtype=t[key]["dtype"])
+        self.first = rd("cluster_first")          # nlist+1 x uint64, member number of each cluster's first member
+        self.counts = rd("cluster_counts")        # nlist   x uint32
+        self.member_doc = rd("member_doc")        # N x uint32, page record of member m
+        self.member_pos = rd("member_pos")        # N x uint16, vector number of member m inside its page
+        self.vector_cluster = rd("vector_cluster")  # N x uint32, cluster of corpus vector g (corpus order)
+        n, k = self.num_vectors, self.nlist
+        if (len(self.first), len(self.counts), len(self.member_doc), len(self.member_pos), len(self.vector_cluster)) \
+                != (k + 1, k, n, n, n):
+            raise ValueError("%s: table lengths do not match nlist=%d / num_vectors=%d" % (outdir, k, n))
+        if self.first[0] != 0 or self.first[-1] != n or not np.array_equal(np.diff(self.first), self.counts):
+            raise ValueError("%s: cluster_first / cluster_counts are inconsistent" % outdir)
+        self._cache = {}
+
+    @property
+    def precisions(self):
+        return list(self.meta["precisions"].keys())
+
+    def _open(self, precision):
+        p = Q.canonical_precision(precision)
+        if p not in self._cache:
+            pm = self.meta["precisions"].get(p)
+            if pm is None:
+                raise KeyError("precision %r not present in %s" % (p, self.outdir))
+            bpv = int(pm["bytes_per_vector"])
+            if bpv != Q.bytes_per_vector(p, self.dim):
+                raise ValueError("%s: bytes_per_vector of %s is inconsistent" % (self.outdir, p))
+            out = []
+            for key, n in (("members", self.num_vectors), ("centroids", self.nlist)):
+                data = np.memmap(os.path.join(self.outdir, pm[key]["file"]), dtype=np.uint8, mode="r")
+                if data.size != L.round_up(n * bpv, self.pad):
+                    raise ValueError("%s: %s is %d bytes, expected %d"
+                                     % (self.outdir, pm[key]["file"], data.size, L.round_up(n * bpv, self.pad)))
+                out.append(data)
+            self._cache[p] = (out[0], out[1], bpv)
+        return self._cache[p]
+
+    def raw_file(self, precision, which="members"):
+        """The whole members (or centroids) file including its zero tail, as a uint8 memmap."""
+        mem, cen, _ = self._open(precision)
+        return mem if which == "members" else cen
+
+    def centroids_raw(self, precision):
+        _, cen, bpv = self._open(precision)
+        return cen[:self.nlist * bpv].reshape(self.nlist, bpv)
+
+    def centroids(self, precision, binary="bits"):
+        """All centroids decoded: (nlist, dim)."""
+        return Q.decode(precision, self.centroids_raw(precision), self.dim, binary=binary)
+
+    def members_raw(self, precision, cluster=None, lo=None, hi=None):
+        """Stored bytes of the members of one cluster, or of member numbers lo..hi-1: (k, bytes_per_vector)."""
+        mem, _, bpv = self._open(precision)
+        if cluster is not None:
+            lo, hi = int(self.first[cluster]), int(self.first[cluster + 1])
+        return mem[lo * bpv:hi * bpv].reshape(hi - lo, bpv)
+
+    def members(self, precision, cluster=None, lo=None, hi=None, binary="bits"):
+        """Members decoded like EmbeddingStore.get(): (k, dim)."""
+        return Q.decode(precision, self.members_raw(precision, cluster, lo, hi), self.dim, binary=binary)
+
+    def cluster_range(self, cluster):
+        """(first member number, one past the last member number) of a cluster."""
+        return int(self.first[cluster]), int(self.first[cluster + 1])

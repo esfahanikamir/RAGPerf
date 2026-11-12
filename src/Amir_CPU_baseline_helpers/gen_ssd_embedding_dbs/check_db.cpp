@@ -13,6 +13,10 @@
 //     ./check_db maxsim <corpus_dir> <query_dir> <dim> <doc_slots> <query_slots> <pad_bytes>
 //                       <fp32|fp16|bf16|int8|int4|bin> <k> [num_queries]
 //     ./check_db selftest [full]
+//   L1 index (IVF store, see FORMAT_GUIDE.md section 10; verify_ivf.py prints the ivfcheck line):
+//     ./check_db ivfcheck  <ivf_dir> <corpus_dir> <dim> <doc_slots> <pad_bytes> <clip_c_float32_hex> [assign_sample]
+//     ./check_db ivfsearch <ivf_dir> <query_dir> <dim> <query_slots> <pad_bytes>
+//                          <fp32|fp16|bf16|int8|int4|bin> <nprobe> <k> [num_queries]
 //
 // Exit code 0 = everything matched.
 
@@ -30,6 +34,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -276,20 +281,42 @@ struct Decoded {                       // one record, ready for dot products
     std::vector<uint64_t> w;           // bin (dim/64 words per vector)
 };
 
-static void decode_record(const Store& s, uint64_t i, std::vector<uint8_t>& raw, Decoded& out) {
-    s.read_record(i, raw);
-    const int dim = s.dim;
-    out.cnt = s.cnt[i];                // only the first cnt vectors are real; the rest is padding
-    const size_t nv = out.cnt;
-    if (s.p == "fp32") { out.f.resize(nv * dim); std::memcpy(out.f.data(), raw.data(), nv * dim * 4); }
-    else if (s.p == "fp16" || s.p == "bf16") {
+// Decode nv stored vectors (back to back at raw) of precision p.
+static void decode_block(const std::string& p, int dim, const uint8_t* raw, size_t nv, Decoded& out) {
+    out.cnt = (uint32_t)nv;
+    if (p == "fp32") { out.f.resize(nv * dim); std::memcpy(out.f.data(), raw, nv * dim * 4); }
+    else if (p == "fp16" || p == "bf16") {
         out.f.resize(nv * dim);
-        for (size_t j = 0; j < nv * dim; j++) { uint16_t h; std::memcpy(&h, &raw[2 * j], 2); out.f[j] = s.p == "fp16" ? f16_to_f32(h) : bf16_to_f32(h); }
-    } else if (s.p == "int8") { out.i8.resize(nv * dim); std::memcpy(out.i8.data(), raw.data(), nv * dim); }
-    else if (s.p == "int4") {
+        for (size_t j = 0; j < nv * dim; j++) { uint16_t h; std::memcpy(&h, &raw[2 * j], 2); out.f[j] = p == "fp16" ? f16_to_f32(h) : bf16_to_f32(h); }
+    } else if (p == "int8") { out.i8.resize(nv * dim); std::memcpy(out.i8.data(), raw, nv * dim); }
+    else if (p == "int4") {
         out.i8.resize(nv * dim);
         for (size_t j = 0; j < nv * dim / 2; j++) { out.i8[2 * j] = (int8_t)int4_even(raw[j]); out.i8[2 * j + 1] = (int8_t)int4_odd(raw[j]); }
-    } else { out.w.resize(nv * (dim / 64)); std::memcpy(out.w.data(), raw.data(), nv * (dim / 8)); }
+    } else { out.w.resize(nv * (dim / 64)); std::memcpy(out.w.data(), raw, nv * (dim / 8)); }
+}
+
+static void decode_record(const Store& s, uint64_t i, std::vector<uint8_t>& raw, Decoded& out) {
+    s.read_record(i, raw);
+    decode_block(s.p, s.dim, raw.data(), s.cnt[i], out);   // only the first cnt vectors are real; the rest is padding
+}
+
+// Score of vector a of q against vector b of d, in the precision's own arithmetic.
+static double dot(const std::string& p, int dim, const Decoded& q, uint32_t a, const Decoded& d, uint32_t b) {
+    if (p == "int8" || p == "int4") {
+        int32_t acc = 0;       // |dot| <= 128 * 127 * 127 < 2^21
+        const int8_t* x = &q.i8[(size_t)a * dim]; const int8_t* y = &d.i8[(size_t)b * dim];
+        for (int k = 0; k < dim; k++) acc += (int32_t)x[k] * (int32_t)y[k];
+        return acc;
+    }
+    if (p == "bin") {
+        int ham = 0;           // dot of +-1 vectors = dim - 2 * popcount(q xor d)
+        for (int k = 0; k < dim / 64; k++) ham += __builtin_popcountll(q.w[(size_t)a * (dim / 64) + k] ^ d.w[(size_t)b * (dim / 64) + k]);
+        return dim - 2 * ham;
+    }
+    double acc = 0.0;
+    const float* x = &q.f[(size_t)a * dim]; const float* y = &d.f[(size_t)b * dim];
+    for (int k = 0; k < dim; k++) acc += (double)x[k] * (double)y[k];
+    return acc;
 }
 
 static double maxsim(const std::string& p, int dim, const Decoded& q, const Decoded& d) {
@@ -297,23 +324,8 @@ static double maxsim(const std::string& p, int dim, const Decoded& q, const Deco
     for (uint32_t a = 0; a < q.cnt; a++) {
         double best = -1e300;
         for (uint32_t b = 0; b < d.cnt; b++) {
-            double dot;
-            if (p == "int8" || p == "int4") {
-                int32_t acc = 0;       // |dot| <= 128 * 127 * 127 < 2^21
-                const int8_t* x = &q.i8[(size_t)a * dim]; const int8_t* y = &d.i8[(size_t)b * dim];
-                for (int k = 0; k < dim; k++) acc += (int32_t)x[k] * (int32_t)y[k];
-                dot = acc;
-            } else if (p == "bin") {
-                int ham = 0;           // dot of +-1 vectors = dim - 2 * popcount(q xor d)
-                for (int k = 0; k < dim / 64; k++) ham += __builtin_popcountll(q.w[(size_t)a * (dim / 64) + k] ^ d.w[(size_t)b * (dim / 64) + k]);
-                dot = dim - 2 * ham;
-            } else {
-                double acc = 0.0;
-                const float* x = &q.f[(size_t)a * dim]; const float* y = &d.f[(size_t)b * dim];
-                for (int k = 0; k < dim; k++) acc += (double)x[k] * (double)y[k];
-                dot = acc;
-            }
-            if (dot > best) best = dot;
+            const double s = dot(p, dim, q, a, d, b);
+            if (s > best) best = s;
         }
         total += best;
     }
@@ -351,6 +363,220 @@ static int cmd_maxsim(int argc, char** argv) {
             else std::printf(" %llu:%.9g", (unsigned long long)scores[i][r].second, scores[i][r].first);
         }
         std::printf("\n");
+    }
+    return 0;
+}
+
+// ------------------------------------------------------------------------------------------------
+// L1 index: the IVF store (FORMAT_GUIDE.md section 10)
+//   member m      : vector bytes at m * bytes_per_vector in ivf_members_<P>.bin (no padding in between)
+//   cluster j     : members first[j] .. first[j+1]-1   (first[] counts MEMBERS, not bytes)
+//   member_doc[m] : page record, member_pos[m] : vector number inside that page
+// ------------------------------------------------------------------------------------------------
+template <class T> static std::vector<T> read_table(const std::string& path) {
+    const uint64_t sz = file_size(path);
+    if (sz % sizeof(T)) die(path + ": size is not a multiple of the entry size");
+    std::vector<T> v(sz / sizeof(T));
+    int f = open(path.c_str(), O_RDONLY);
+    if (f < 0) die("cannot open " + path);
+    if (sz) pread_full(f, v.data(), sz, 0);
+    close(f);
+    return v;
+}
+
+struct Mapped { const uint8_t* p = nullptr; uint64_t n = 0; };
+static Mapped map_file(const std::string& path) {
+    Mapped m; m.n = file_size(path);
+    int f = open(path.c_str(), O_RDONLY);
+    if (f < 0) die("cannot open " + path);
+    void* a = m.n ? mmap(nullptr, m.n, PROT_READ, MAP_PRIVATE, f, 0) : nullptr;
+    close(f);
+    if (m.n && a == MAP_FAILED) die("cannot map " + path);
+    m.p = (const uint8_t*)a;
+    return m;
+}
+
+struct Ivf {
+    std::string dir;
+    uint64_t n = 0, nlist = 0;
+    std::vector<uint64_t> first;                 // nlist+1
+    std::vector<uint32_t> counts, doc, vcl;      // nlist, n, n
+    std::vector<uint16_t> pos;                   // n
+    int load(const std::string& d) {             // returns the number of structural errors
+        dir = d;
+        first = read_table<uint64_t>(d + "/ivf_cluster_first.u64");
+        counts = read_table<uint32_t>(d + "/ivf_cluster_counts.u32");
+        doc = read_table<uint32_t>(d + "/ivf_member_doc.u32");
+        pos = read_table<uint16_t>(d + "/ivf_member_pos.u16");
+        vcl = read_table<uint32_t>(d + "/ivf_vector_cluster.u32");
+        nlist = counts.size(); n = doc.size();
+        int bad = 0;
+        if (first.size() != nlist + 1 || pos.size() != n || vcl.size() != n) { std::printf("  FAIL table lengths\n"); return 1; }
+        if (first[0] != 0 || first[nlist] != n) bad++;
+        for (uint64_t j = 0; j < nlist; j++) if (first[j + 1] - first[j] != counts[j]) { bad++; break; }
+        if (bad) std::printf("  FAIL cluster_first / cluster_counts are inconsistent\n");
+        return bad;
+    }
+    Mapped file(const std::string& what, const std::string& p, uint64_t vectors, int dim, long pad, int& bad) const {
+        Mapped m = map_file(dir + "/ivf_" + what + "_" + p + ".bin");
+        const uint64_t payload = vectors * (uint64_t)bytes_per_vector(p, dim);
+        const uint64_t want = (payload + (uint64_t)pad - 1) / (uint64_t)pad * (uint64_t)pad;
+        if (m.n != want) { std::printf("  FAIL %s %s: %llu bytes, expected %llu\n", what.c_str(), p.c_str(), (unsigned long long)m.n, (unsigned long long)want); bad++; return m; }
+        for (uint64_t j = payload; j < m.n; j++) if (m.p[j]) { std::printf("  FAIL %s %s: non-zero tail\n", what.c_str(), p.c_str()); bad++; break; }
+        return m;
+    }
+};
+
+static int cmd_ivfcheck(int argc, char** argv) {
+    if (argc != 8 && argc != 9) die("usage: ivfcheck <ivf_dir> <corpus_dir> <dim> <doc_slots> <pad_bytes> <clip_c_float32_hex> [assign_sample]");
+    const std::string idir = argv[2], cdir = argv[3];
+    const int dim = std::atoi(argv[4]);
+    const long slots = std::atol(argv[5]), pad = std::atol(argv[6]);
+    const float c = bits_f32((uint32_t)std::strtoul(argv[7], nullptr, 16));
+    uint64_t sample = argc == 9 ? (uint64_t)std::atoll(argv[8]) : 20000;     // vectors whose assignment is recomputed; 0 = all
+    if (!(c > 0.0f) || dim <= 0 || dim % 8) die("bad dim or clip value");
+    Ivf ivf;
+    int fails = ivf.load(idir);
+    Store corpus;
+    fails += corpus.open_(cdir, "emb", "fp32", dim, slots, pad);
+    if (fails) { std::printf("structure errors, stopping\n"); return 1; }
+    const uint64_t n = ivf.n, nlist = ivf.nlist;
+    std::printf("ivfcheck %s: %llu vectors in %llu clusters, corpus %s (%llu pages x %ld), clip c = %.9g\n", idir.c_str(), (unsigned long long)n,
+                (unsigned long long)nlist, cdir.c_str(), (unsigned long long)corpus.n, slots, (double)c);
+    for (uint64_t i = 0; i < corpus.n; i++) if (corpus.cnt[i] != (uint32_t)slots) die("corpus record does not hold exactly doc_slots vectors");
+    if (n != corpus.n * (uint64_t)slots) { std::printf("  FAIL the index holds %llu vectors, the corpus %llu\n", (unsigned long long)n, (unsigned long long)(corpus.n * slots)); return 1; }
+
+    Mapped mem[6], cen[6];
+    for (int k = 0; k < 6; k++) { mem[k] = ivf.file("members", PRECS[k], n, dim, pad, fails); cen[k] = ivf.file("centroids", PRECS[k], nlist, dim, pad, fails); }
+    if (fails) return 1;
+    std::printf("  [ok] file sizes and zero tails of members and centroids in all precisions\n");
+
+    // every corpus vector exactly once; inverse map corpus vector g -> member m
+    std::vector<uint32_t> inv(n, 0xFFFFFFFFu);
+    uint64_t bad_perm = 0, bad_order = 0, bad_vcl = 0;
+    for (uint64_t j = 0; j < nlist; j++)
+        for (uint64_t m = ivf.first[j]; m < ivf.first[j + 1]; m++) {
+            if (ivf.doc[m] >= corpus.n || ivf.pos[m] >= (uint64_t)slots) { bad_perm++; continue; }
+            const uint64_t g = (uint64_t)ivf.doc[m] * (uint64_t)slots + ivf.pos[m];
+            if (inv[g] != 0xFFFFFFFFu) bad_perm++;
+            inv[g] = (uint32_t)m;
+            if (ivf.vcl[g] != j) bad_vcl++;
+            if (m > ivf.first[j]) { const uint64_t gp = (uint64_t)ivf.doc[m - 1] * (uint64_t)slots + ivf.pos[m - 1]; if (gp >= g) bad_order++; }
+        }
+    for (uint64_t g = 0; g < n; g++) if (inv[g] == 0xFFFFFFFFu) bad_perm++;
+    std::printf("  [%s] every corpus vector appears exactly once\n", bad_perm ? "FAIL" : "ok");
+    std::printf("  [%s] vector_cluster agrees with the cluster each member is stored in\n", bad_vcl ? "FAIL" : "ok");
+    std::printf("  [%s] inside a cluster, members are sorted by (page, position)\n", bad_order ? "FAIL" : "ok");
+    fails += (bad_perm != 0) + (bad_vcl != 0) + (bad_order != 0);
+    if (bad_perm) return 1;
+
+    // centroids: every precision is encode(fp32 centroid)
+    std::vector<float> cent((size_t)nlist * dim);
+    std::memcpy(cent.data(), cen[0].p, cent.size() * 4);
+    std::vector<uint8_t> want(4 * (size_t)dim);
+    for (int k = 1; k < 6; k++) {
+        const int bpv = bytes_per_vector(PRECS[k], dim);
+        uint64_t bad = 0;
+        for (uint64_t j = 0; j < nlist; j++) { encode(PRECS[k], &cent[(size_t)j * dim], dim, c, want.data()); if (std::memcmp(want.data(), cen[k].p + j * bpv, bpv)) bad++; }
+        std::printf("  [%s] %s: centroid bytes == encode(fp32 centroid)\n", bad ? "FAIL" : "ok", PRECS[k]);
+        fails += bad != 0;
+    }
+
+    // members: every precision is encode(fp32 corpus vector); assignment of a sample of vectors
+    if (sample == 0 || sample > n) sample = n;
+    const uint64_t stride = n / sample ? n / sample : 1;
+    uint64_t bad_mem[6] = {0}, checked = 0, not_best = 0, other_argmax = 0;
+    std::vector<uint8_t> raw;
+    for (uint64_t i = 0; i < corpus.n; i++) {
+        corpus.read_record(i, raw);
+        for (long v = 0; v < slots; v++) {
+            const uint64_t g = i * (uint64_t)slots + (uint64_t)v, m = inv[g];
+            float x[1024];
+            if (dim > 1024) die("dim too large");
+            std::memcpy(x, raw.data() + (size_t)v * 4 * dim, 4 * (size_t)dim);
+            for (int k = 0; k < 6; k++) {
+                const int bpv = bytes_per_vector(PRECS[k], dim);
+                encode(PRECS[k], x, dim, c, want.data());
+                if (std::memcmp(want.data(), mem[k].p + m * bpv, bpv)) bad_mem[k]++;
+            }
+            if (g % stride == 0) {  // is the stored cluster the one with the largest dot product?
+                double best = -1e300; uint64_t arg = 0;
+                for (uint64_t j = 0; j < nlist; j++) {
+                    double acc = 0.0; const float* y = &cent[(size_t)j * dim];
+                    for (int d = 0; d < dim; d++) acc += (double)x[d] * (double)y[d];
+                    if (acc > best) { best = acc; arg = j; }
+                }
+                double mine = 0.0; const float* y = &cent[(size_t)ivf.vcl[g] * dim];
+                for (int d = 0; d < dim; d++) mine += (double)x[d] * (double)y[d];
+                checked++;
+                if (mine < best - 1e-9) not_best++;
+                if (arg != ivf.vcl[g]) other_argmax++;
+            }
+        }
+    }
+    for (int k = 0; k < 6; k++) {
+        std::printf("  [%s] %s: %llu / %llu member vectors byte-identical to encode(fp32 corpus vector)\n", bad_mem[k] ? "FAIL" : "ok", PRECS[k],
+                    (unsigned long long)(n - bad_mem[k]), (unsigned long long)n);
+        fails += bad_mem[k] != 0;
+    }
+    std::printf("  [%s] assignment: %llu / %llu sampled vectors are in the cluster with the largest dot product\n", not_best ? "FAIL" : "ok",
+                (unsigned long long)(checked - not_best), (unsigned long long)checked);
+    std::printf("       (double arithmetic picked a different, equally good cluster for %llu of them)\n", (unsigned long long)other_argmax);
+    fails += not_best != 0;
+    std::printf("%s\n", fails ? "CHECK FAILED" : "ALL CHECKS PASSED");
+    return fails ? 1 : 0;
+}
+
+// Reference first-stage search. For every query vector:
+//   1. score all centroids, take the nprobe best        (ties: lower cluster number first)
+//   2. score every member of those clusters
+//   3. keep the k best members                          (ties: lower member number first)
+// Output, one line per query vector:  q <query> t <vector> <member>:<page>:<position>:<score> ...
+static int cmd_ivfsearch(int argc, char** argv) {
+    if (argc != 10 && argc != 11) die("usage: ivfsearch <ivf_dir> <query_dir> <dim> <query_slots> <pad_bytes> <precision> <nprobe> <k> [num_queries]");
+    const std::string idir = argv[2], p = argv[7];
+    const int dim = std::atoi(argv[4]);
+    const long pad = std::atol(argv[6]);
+    const size_t nprobe = (size_t)std::atol(argv[8]), k = (size_t)std::atol(argv[9]);
+    if (dim <= 0 || dim % 64) die("dim must be a multiple of 64");
+    Ivf ivf;
+    Store qrys;
+    int fails = ivf.load(idir) + qrys.open_(argv[3], "qry", p, dim, std::atol(argv[5]), pad);
+    Mapped mem = ivf.file("members", p, ivf.n, dim, pad, fails), cen = ivf.file("centroids", p, ivf.nlist, dim, pad, fails);
+    if (fails) return 1;
+    uint64_t nq = qrys.n;
+    if (argc == 11 && (uint64_t)std::atol(argv[10]) < nq) nq = (uint64_t)std::atol(argv[10]);
+    const int bpv = bytes_per_vector(p, dim);
+    const bool integer = (p == "int8" || p == "int4" || p == "bin");
+    typedef std::pair<double, uint64_t> Hit;
+    auto better = [](const Hit& a, const Hit& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; };
+
+    Decoded centroids, q, block;
+    decode_block(p, dim, cen.p, ivf.nlist, centroids);
+    std::vector<uint8_t> raw;
+    std::vector<Hit> cs(ivf.nlist), hits;
+    for (uint64_t i = 0; i < nq; i++) {
+        decode_record(qrys, i, raw, q);
+        for (uint32_t t = 0; t < q.cnt; t++) {
+            for (uint64_t j = 0; j < ivf.nlist; j++) cs[j] = Hit(dot(p, dim, q, t, centroids, (uint32_t)j), j);
+            const size_t np = std::min(nprobe, (size_t)ivf.nlist);
+            std::partial_sort(cs.begin(), cs.begin() + np, cs.end(), better);
+            hits.clear();
+            for (size_t r = 0; r < np; r++) {
+                const uint64_t j = cs[r].second;
+                decode_block(p, dim, mem.p + ivf.first[j] * (uint64_t)bpv, ivf.counts[j], block);
+                for (uint32_t b = 0; b < block.cnt; b++) hits.push_back(Hit(dot(p, dim, q, t, block, b), ivf.first[j] + b));
+            }
+            const size_t kk = std::min(k, hits.size());
+            std::partial_sort(hits.begin(), hits.begin() + kk, hits.end(), better);
+            std::printf("q %llu t %u", (unsigned long long)i, t);
+            for (size_t r = 0; r < kk; r++) {
+                const uint64_t m = hits[r].second;
+                if (integer) std::printf(" %llu:%u:%u:%lld", (unsigned long long)m, ivf.doc[m], (unsigned)ivf.pos[m], (long long)hits[r].first);
+                else std::printf(" %llu:%u:%u:%.9g", (unsigned long long)m, ivf.doc[m], (unsigned)ivf.pos[m], hits[r].first);
+            }
+            std::printf("\n");
+        }
     }
     return 0;
 }
@@ -415,7 +641,9 @@ int main(int argc, char** argv) {
     if (*(const uint8_t*)&one != 1) die("this program assumes a little-endian host");
     if (argc >= 2 && std::string(argv[1]) == "check") return cmd_check(argc, argv);
     if (argc >= 2 && std::string(argv[1]) == "maxsim") return cmd_maxsim(argc, argv);
+    if (argc >= 2 && std::string(argv[1]) == "ivfcheck") return cmd_ivfcheck(argc, argv);
+    if (argc >= 2 && std::string(argv[1]) == "ivfsearch") return cmd_ivfsearch(argc, argv);
     if (argc >= 2 && std::string(argv[1]) == "selftest") return cmd_selftest(argc >= 3 && std::string(argv[2]) == "full");
-    std::fprintf(stderr, "usage: check_db check|maxsim|selftest ...  (see the top of check_db.cpp)\n");
+    std::fprintf(stderr, "usage: check_db check|maxsim|ivfcheck|ivfsearch|selftest ...  (see the top of check_db.cpp)\n");
     return 2;
 }

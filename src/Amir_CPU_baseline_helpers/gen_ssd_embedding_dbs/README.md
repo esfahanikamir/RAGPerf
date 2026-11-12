@@ -18,6 +18,8 @@ int8/int4 clip value `c` (computed from the corpus, copied to the queries).
 | `reader.py` | `EmbeddingStore(dir)` reads either store |
 | `verify.py` | checks both stores and their consistency; writes reference top-k |
 | `check_db.cpp` | independent C++ check, reference decode functions and MaxSim |
+| `build_ivf.py` | corpus store → L1 index (IVF store): clusters all vectors, writes centroids, cluster table, members in every precision, member → page tables |
+| `verify_ivf.py` | checks the IVF store against the corpus store; reports first-stage quality with a query store |
 | `run_maxsim_all.sh` | scores every query against every page in every precision with `check_db` and saves the full rankings |
 
 Dependencies: NumPy (tqdm optional). The query pipeline additionally needs the RAGPerf environment.
@@ -74,4 +76,14 @@ Reference scores of all queries against all pages, one file per precision (see t
 
 ```bash
 ./run_maxsim_all.sh CORPUS_DB QUERY_DB OUT_DIR
+```
+
+L1 index (first stage), see FORMAT_GUIDE.md section 10:
+
+```bash
+python build_ivf.py --corpus CORPUS_DB --outdir IVF_DB
+```
+
+```bash
+python verify_ivf.py --corpus CORPUS_DB --ivf IVF_DB --queries QUERY_DB | tee verify_ivf.log
 ```

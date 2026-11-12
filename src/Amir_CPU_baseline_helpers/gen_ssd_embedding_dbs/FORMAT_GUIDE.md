@@ -550,9 +550,12 @@ python queries.py --src /path/to/QUERY_DB --corpus /path/to/CORPUS_DB_NEW --outd
 | `layout.py` | the record/file layout and metadata. The only place records are written. |
 | `convert.py` | corpus pickle → corpus store |
 | `queries.py` | `save_query_db()` (called by the pipeline) and re-encoding of a query store for another corpus |
-| `reader.py` | `EmbeddingStore(dir)`: reads a corpus or a query store; refuses truncated or inconsistent files |
+| `reader.py` | `EmbeddingStore(dir)`: reads a corpus or a query store; `IVFStore(dir)`: reads the L1 index; both refuse truncated or inconsistent files |
 | `verify.py` | all checks, top-k dump |
-| `check_db.cpp` | independent C++ check, reference decode functions, reference MaxSim |
+| `build_ivf.py` | corpus store → L1 index (IVF store), section 10 |
+| `verify_ivf.py` | checks the IVF store against the corpus store; first-stage quality report |
+| `check_db.cpp` | independent C++ check, reference decode functions, reference MaxSim, IVF check and reference L1 search |
+| `run_maxsim_all.sh` | exact MaxSim of every query against every page in every precision, saved to files |
 | `src/RAGPipeline/ImagesRAGPipeline_rerank_save_q_embeddings.py` | runs the encoder and calls `queries.save_query_db()` |
 
 ```python
@@ -562,4 +565,198 @@ qrys = EmbeddingStore("QUERY_DB")
 d = docs.get("int8", 17)        # (1031, 128) int8
 q = qrys.get("int8", 3)         # (n_tokens, 128) int8, padding already removed
 qrys.question(3); docs.filepath(17); docs.clip_c
+```
+
+---
+
+## 10. The L1 index (IVF store)
+
+The corpus and query stores serve the exact second stage (L2): given page numbers, read those
+pages and compute MaxSim. The IVF store serves the **first stage (L1)**: for a query vector, find
+similar page vectors quickly without looking at all of them, and report which pages they belong to.
+
+The IVF store holds **exactly the same vectors as the corpus store, in a different order**:
+grouped by cluster instead of by page. It is meant to be loaded completely into memory.
+
+All examples in this section are from a test index with 309,300 vectors in 4,096 clusters.
+
+### 10.1 How it is built (`build_ivf.py`)
+
+1. **Read** every fp32 vector of the corpus store. Call their number N.
+2. **Choose the number of clusters from N.** Nothing is hard-coded:
+
+   ```
+   nlist = smallest power of two that is at least 4 × √N
+   ```
+
+   | N (vectors) | 4 × √N | nlist |
+   |---|---|---|
+   | 309,300 (test index) | 2,225 | 4,096 |
+   | 2,384,703 (2,313 pages) | 6,177 | 8,192 |
+   | 10,000,000 | 12,649 | 16,384 |
+
+   The factor 4 is the lower end of the FAISS range (4·√N to 16·√N). `--cluster-factor` changes
+   it, `--nlist` forces a value, `--no-pow2` turns the rounding off. The build stops if there
+   would be fewer than 30 vectors per cluster on average (the FAISS minimum).
+3. **Cluster** with spherical k-means: every centroid has length 1, and a vector belongs to the
+   centroid with the **largest dot product**.
+4. **Assign** every vector to its cluster with an exactly defined rule:
+
+   ```
+   cluster(x) = the centroid with the largest exact dot product  Σ x[d] · c[d]
+                (c = the stored fp32 centroid); exact ties go to the lowest cluster number
+   ```
+
+5. **Write** the files below, in all six precisions.
+
+K-means training is not bit-reproducible between machines (it depends on the math library). That
+does not matter: the centroids are stored, and step 4 is recomputed from them by `verify_ivf.py`
+and checked by `check_db ivfcheck`. On the same machine, building twice gives identical files.
+
+### 10.2 Files
+
+| file | type | length | meaning |
+|------|------|--------|---------|
+| `ivf_centroids_<P>.bin` | vectors | nlist | the centroids, back to back |
+| `ivf_members_<P>.bin` | vectors | N | all vectors, grouped by cluster, back to back |
+| `ivf_cluster_first.u64` | uint64 LE | nlist + 1 | `first[j]` = **member number** of the first member of cluster `j`; `first[nlist]` = N |
+| `ivf_cluster_counts.u32` | uint32 LE | nlist | `counts[j]` = number of members of cluster `j` |
+| `ivf_member_doc.u32` | uint32 LE | N | page record of each member |
+| `ivf_member_pos.u16` | uint16 LE | N | vector number of each member inside its page (0..1030) |
+| `ivf_vector_cluster.u32` | uint32 LE | N | the reverse direction: cluster of corpus vector `page × 1031 + position` |
+| `ivf_metadata.json` | text | — | parameters, statistics, checksums |
+
+`<P>` is `fp32, fp16, bf16, int8, int4, bin`, with the same encodings (section 4) and the same
+clip value `c` as the corpus store. The cluster tables and the page tables are shared by all
+precisions: member 211 is the same vector in every precision file.
+
+### 10.3 One indexing rule: the member number
+
+Every vector in the index has a **member number** `m` from 0 to N−1. Everything is addressed by it:
+
+```
+vector bytes of member m   at byte  m × bytes_per_vector   in ivf_members_<P>.bin
+page of member m           at byte  4 × m                  in ivf_member_doc.u32
+position inside that page  at byte  2 × m                  in ivf_member_pos.u16
+cluster j owns members     first[j] .. first[j+1] − 1      (that is counts[j] members)
+centroid j                 at byte  j × bytes_per_vector   in ivf_centroids_<P>.bin
+```
+
+Example:
+
+```
+ivf_cluster_first.u64 : 00 00 00 00 00 00 00 00 | 0E 00 00 00 00 00 00 00 | 80 00 00 00 00 00 00 00 ...
+                        = 0                       = 14                      = 128
+first  = 0, 14, 128, 209, 304, 308, ...
+counts = 14, 114, 81, 95, 4, ...
+```
+
+Cluster 3 owns members 209 to 303 (95 members). Its third member is member 211:
+
+```
+int8 vector : byte 211 × 128 = 27008 in ivf_members_int8.bin     -> 2C D2 27 34 EC 0E F1 04 ...
+fp32 vector : byte 211 × 512 = 108032 in ivf_members_fp32.bin
+page        : byte 4 × 211 = 844 in ivf_member_doc.u32           -> page record 0
+position    : byte 2 × 211 = 422 in ivf_member_pos.u16           -> vector 192 of that page
+```
+
+The corpus store has the same bytes `2C D2 27 34 EC 0E F1 04` at page 0, vector 192 of
+`emb_int8.bin`, and `ivf_vector_cluster.u32` says corpus vector `0 × 1031 + 192` is in cluster 3.
+
+Inside a cluster, members are sorted by (page, position).
+
+### 10.4 How this differs from the corpus and query stores
+
+| | corpus / query store | IVF store |
+|---|---|---|
+| unit of the offset table | **bytes** (`offsets`) | **member numbers** (`cluster_first`) |
+| padding between records | zero bytes up to 4096 per record | **none**: vectors are back to back |
+| padding at the end of a file | none needed | zero bytes up to a multiple of 4096 |
+| size of a record / cluster | fixed | **varies**; `max_cluster_size` is in the metadata |
+| empty record | never | a cluster **can** be empty (`counts[j] = 0`) |
+
+So there are no phantom vectors inside the data, but the padding rule still applies at the end
+of each file: a file holds exactly N (or nlist) vectors, and whatever follows is not data.
+
+### 10.5 Centroids
+
+* `ivf_centroids_fp32.bin` is the master. Centroids have length 1 and full float32 precision.
+* The other precisions are made by the same encoder with the same `c`.
+* Unlike the page vectors, the centroids are **not** bf16 numbers, so `ivf_centroids_bf16.bin` is a
+  rounded copy of the fp32 file, not an exact one. (For the members, bf16 is still exact.)
+* Cluster membership was decided with the fp32 centroids. A search that uses lower-precision
+  centroids and members will sometimes look in slightly different clusters. That is expected, and
+  `verify_ivf.py` measures its effect.
+
+### 10.6 The reference search
+
+For one query vector, with two query-time settings `nprobe` and `k` (neither is stored in the index):
+
+1. score **all** centroids against the query vector, keep the `nprobe` best
+   (ties: lower cluster number first);
+2. score **every member** of those clusters;
+3. keep the `k` best members (ties: lower member number first);
+4. the pages of those members (`ivf_member_doc`) are candidates for the second stage.
+
+Scores are computed as in section 5, in the precision's own arithmetic. `check_db ivfsearch` is
+the reference implementation and prints one line per query vector:
+
+```
+q <query> t <query vector> <member>:<page>:<position>:<score> ...
+
+q 0 t 0 213131:234:114:134217 160763:181:395:110878 160777:234:437:108276
+```
+
+For int8, int4 and bin the scores are exact integers, so another implementation must reproduce
+these lines exactly. For the float precisions, near-ties can be ordered differently.
+
+How hits from all query vectors are combined into the candidate list for L2, and how many
+candidates are passed on, is a query-time decision and not part of this format.
+
+### 10.7 Metadata (`ivf_metadata.json`)
+
+| key | meaning |
+|-----|---------|
+| `num_vectors`, `nlist`, `dim`, `pad_bytes`, `num_docs` | N, number of clusters, 128, 4096, number of pages |
+| `nlist_rule` | factor, power-of-two rounding, the value the rule gave, whether it was overridden |
+| `max_cluster_size`, `cluster_sizes` | largest cluster, and min / median / p90 / p99 / max / empty count |
+| `similarity`, `assignment`, `assignment_info` | the rules of 10.1, and how many vectors were close calls |
+| `training` | k-means settings and the per-iteration log |
+| `corpus.corpus_id`, `quantization.clip_c_float32_hex` | the corpus this index belongs to, and `c` |
+| `tables.<name>` | file, type, entries and SHA-256 of the five tables |
+| `precisions.<P>.members`, `.centroids` | file, vectors, `payload_bytes`, `file_bytes`, SHA-256 |
+
+### 10.8 Building and verifying
+
+```bash
+python build_ivf.py --corpus /path/to/CORPUS_DB --outdir /path/to/IVF_DB
+```
+
+```bash
+python verify_ivf.py --corpus /path/to/CORPUS_DB --ivf /path/to/IVF_DB --queries /path/to/QUERY_DB | tee verify_ivf.log
+```
+
+`verify_ivf.py` checks the structure, that every corpus vector is in the index exactly once
+with the right page and position, that the bytes equal the corpus store's bytes in every
+precision, and that every vector is in the right cluster. With `--queries` it also prints, per
+precision and per `nprobe`, how many of the true nearest vectors the first stage finds, how many
+pages become candidates, and whether the pages that exact MaxSim ranks best are among them.
+
+Then the independent C++ check (the exact line is printed under "Facts"):
+
+```
+./check_db ivfcheck  <ivf_dir> <corpus_dir> <dim> <doc_slots> <pad_bytes> <clip hex> [assign_sample]
+./check_db ivfsearch <ivf_dir> <query_dir> <dim> <query_slots> <pad_bytes> <precision> <nprobe> <k> [num_queries]
+```
+
+`ivfcheck` recomputes the cluster of 20,000 vectors by default; pass `0` as the last argument to
+recompute all of them (slow: every vector against every centroid in scalar code).
+
+```python
+from reader import IVFStore
+ivf = IVFStore("IVF_DB")
+C = ivf.centroids("int8")            # (nlist, 128)
+M = ivf.members("int8", 3)           # members of cluster 3: (counts[3], 128)
+lo, hi = ivf.cluster_range(3)        # member numbers lo .. hi-1
+ivf.member_doc[lo:hi], ivf.member_pos[lo:hi]
 ```
